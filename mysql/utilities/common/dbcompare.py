@@ -20,6 +20,7 @@
 This file contains the methods for checking consistency among two databases.
 """
 from string import lower
+from bs4.element import CData
 
 from mysql.utilities.common.options import parse_connection
 from mysql.utilities.exception import UtilError, UtilDBError
@@ -264,14 +265,14 @@ def get_common_objects(server1, server2, db1, db2,
             element = item[0]
             name    = item[1][0]
 
-            elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, server=server2_str)
+            elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, host=server2.host)
             missing.insert(1, elementTag)
 
         for item in b:
             element = item[0]
             name    = item[1][0]
 
-            elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, server=server1_str)
+            elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, host=server1.host)
             missing.insert(1, elementTag)
 
         output.xml.out.insert(1, missing)
@@ -396,7 +397,7 @@ def build_diff_list(diff1, diff2, transform1, transform2,
     Note: to specify a non-SQL difference for data, set
           options['data_diff'] = True
     
-    diff1[in]              definitiion diff for first server
+    diff1[in]              definition diff for first server
     diff2[in]              definition diff for second server
     transform1[in]         transformation for first server
     transform2[in]         transformation for second server
@@ -409,7 +410,12 @@ def build_diff_list(diff1, diff2, transform1, transform2,
     # Don't build the list if there were no differences.
     if len(diff1) == 0:
         return []
-        
+
+    output = Output()
+    transformation = output.xml.new_tag("transformation")
+    forwardTransform = output.xml.new_tag("forward")
+    reverseTransform = output.xml.new_tag("reverse")
+
     reverse = options.get('reverse', False)
     diff_list = []    
     if options.get('difftype') == 'sql':
@@ -424,9 +430,17 @@ def build_diff_list(diff1, diff2, transform1, transform2,
                              first)
             diff_list.extend(transform1)
             diff_list.append("")
+
+            forwardTransform["changes-for"] = first
+            forwardTransform.insert(1, CData(transform1[0]))
+
             if reverse and len(transform2) > 0:
                 diff_list.append("#\n# Transformation for reverse changes "
                                  "(--changes-for=%s):\n#" % second)
+
+                reverseTransform["changes-for"] = second
+                reverseTransform.insert(1, CData(transform2[0]))
+
                 for row in transform2:
                     sub_rows = row.split('\n')
                     for sub_row in sub_rows:
@@ -446,6 +460,19 @@ def build_diff_list(diff1, diff2, transform1, transform2,
             for row in diff2:
                 diff_list.append("# %s" % row)
             diff_list.append("#\n")
+
+    if output.xml.out.transformations is None:
+        transformations = output.xml.new_tag("transformations")
+        output.xml.out.insert(1, transformations)
+
+    if len(list(forwardTransform.children)) > 0:
+        transformation.insert(1, forwardTransform)
+
+    if len(list(reverseTransform.children)) > 0:
+        transformation.insert(1, reverseTransform)
+
+    if len(list(transformation.children)) > 0:
+        output.xml.out.transformations.insert(1, transformation)
 
     return diff_list
 
@@ -555,7 +582,7 @@ def diff_objects(server1, server2, object1, object2, options):
         if not quiet or \
            (not options.get("suppress_sql", False) and difftype == 'sql'):
             for line in diff_list:
-                print line
+                print "# " + line
 
         return diff_list
     
