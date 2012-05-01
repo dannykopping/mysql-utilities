@@ -33,7 +33,7 @@ from mysql.utilities.exception import UtilError
 from optparse import Option as CustomOption, OptionValueError as ValueError
 
 _PERMITTED_FORMATS = ["grid", "tab", "csv", "vertical"]
-_PERMITTED_DIFFS = ["unified", "context", "differ"]
+_PERMITTED_DIFFS = ["unified", "context", "differ", "xml"]
 _PERMITTED_RPL_DUMP = ["master", "slave"]
 
 def prefix_check_choice(option, opt, value):
@@ -256,7 +256,7 @@ def add_difftype(parser, allow_sql=False, default="unified"):
     default[in]       the default option
                       (default is unified)
     """
-    choice_list = ['unified', 'context', 'differ']
+    choice_list = ['unified', 'context', 'differ', 'xml']
     if allow_sql:
         choice_list.append('sql')
     parser.add_option("-d", "--difftype", action="store", dest="difftype",

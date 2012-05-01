@@ -88,8 +88,7 @@ def database_diff(server1_val, server2_val, db1, db2, options):
     except:
         raise
         
-    in_both, in_db1, in_db2 = get_common_objects(server1, server2,
-                                                 db1, db2, True, options)
+    in_both, in_db1, in_db2 = get_common_objects(server1, server2, db1, db2, True, options)
     in_both.sort()
     if (len(in_db1) > 0 or len(in_db2) > 0) and not force:
         return False

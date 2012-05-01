@@ -64,6 +64,10 @@ parser.add_option("--width", action="store", dest="width",
                   type = "int", help="display width",
                   default=PRINT_WIDTH)
 
+# XML output
+parser.add_option("--xml", action="store_true", dest="output_xml",
+                  help="Output XML report only")
+
 # Force mode
 parser.add_option("--force", action="store_true", dest="force",
                   help="do not abort when a diff test fails")
@@ -91,6 +95,7 @@ options = {
     "quiet"            : opt.quiet,
     "verbosity"        : opt.verbosity,
     "difftype"         : opt.difftype,
+    "output-xml"       : opt.output_xml,
     "force"            : opt.force,
     "width"            : opt.width,
     "changes-for"      : opt.changes_for,
@@ -146,8 +151,7 @@ for argument in args:
     # We have db1:db2
     else:
         try:
-            res = database_diff(server1_values, server2_values,
-                                db1, db2, options)
+            res = database_diff(server1_values, server2_values, db1, db2, options)
         except UtilError, e:
             print "ERROR:", e.errmsg
             exit(1)
@@ -160,13 +164,17 @@ for argument in args:
 if diff_failed:
     if not opt.quiet:
         print "Compare failed. One or more differences found."
+
+    if opt.output_xml:
         print output.xml.prettify()
-    else:
-        print output.xml.prettify()
+
     exit(1)            
 
 if not opt.quiet:
     print "Success. All objects are the same."
+
+if opt.output_xml:
+    print output.xml.prettify()
 
 exit()
 

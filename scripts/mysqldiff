@@ -25,15 +25,13 @@ import optparse
 import os
 import re
 import sys
-import xmlwitch
-from mysql.utilities import VERSION_FRM
 from mysql.utilities.command.diff import object_diff, database_diff
 from mysql.utilities.common.options import parse_connection, add_difftype
 from mysql.utilities.common.options import add_verbosity, check_verbosity
 from mysql.utilities.common.options import add_changes_for, add_reverse
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.exception import UtilError
-from mysql.dk import Output
+from mysql.utilities.common.output import Output
 
 # Constants
 NAME = "MySQL Utilities - mysqldiff "
@@ -43,7 +41,7 @@ USAGE = "%prog --server1=user:pass@host:port:socket " + \
         "--server2=user:pass@host:port:socket db1.object1:db2.object1 db3:db4"
 PRINT_WIDTH = 75
 
-xml = xmlwitch.Builder(version='1.0', encoding='utf-8')
+output = Output()
 
 # Setup the command parser
 parser = setup_common_options(os.path.basename(sys.argv[0]),
@@ -102,14 +100,8 @@ options = {
 # Parse server connection values
 try:
     server1_values = parse_connection(opt.server1)
-    with xml.out:
-      with xml.connection:
-        xml.server1("", connected='true')
 except:
     parser.error("Server1 connection values invalid or cannot be parsed.")
-    with xml.out:
-      with xml.connection:
-        xml.server1(sys.exc_info()[0], connected='false')
 
 if opt.server2 is not None:
     try:
@@ -118,7 +110,7 @@ if opt.server2 is not None:
         parser.error("Server2 connection values invalid or cannot be parsed.")
 else:
     server2_values = None
-
+    
 # Check for arguments
 if len(args) == 0:
     parser.error("No objects specified to compare.")
@@ -135,7 +127,7 @@ for argument in args:
        (obj1 is None and obj2 is not None):
         parser.error("Incorrect object compare argument. "
                       "Format should be: db1.object:db2:object or db1:db2.")
-
+    
     # We have db1.obj:db2.obj
     if obj1 is not None:
         try:
@@ -146,21 +138,20 @@ for argument in args:
             print "ERROR:", e.errmsg
             exit(1)
         except Exception, e:
-            print ">>>", e
+            print e
             exit(1)
         if diff is not None:
             diff_failed = True
-
+            
     # We have db1:db2
     else:
         try:
-            res = database_diff(server1_values, server2_values,
-                                db1, db2, options)
+            res = database_diff(server1_values, server2_values, db1, db2, options)
         except UtilError, e:
             print "ERROR:", e.errmsg
             exit(1)
         except Exception, e:
-            print ">>>", e
+            print e
             exit(1)
         if not res:
             diff_failed = True
@@ -168,11 +159,13 @@ for argument in args:
 if diff_failed:
     if not opt.quiet:
         print "Compare failed. One or more differences found."
-        print xml
-    exit(1)
+
+    print output.xml.prettify()
+    exit(1)            
 
 if not opt.quiet:
     print "Success. All objects are the same."
 
+print output.xml.prettify()
 exit()
 

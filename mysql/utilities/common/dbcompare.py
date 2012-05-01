@@ -136,7 +136,7 @@ def get_create_object(server, object_name, options):
     return create_stmt
 
 
-def print_missing_list(item_list, first, second):
+def print_missing_list(item_list, first, second, options={}):
     """Print the list of items in the list.
     
     This method is used to display the list of objects that are missing
@@ -148,11 +148,17 @@ def print_missing_list(item_list, first, second):
     
     Returns bool True if items in the list, False if list is empty
     """
+
+    output_xml = options.get("output-xml", False)
+
     if len(item_list) == 0:
         return False
-    print "# WARNING: Objects in {0} but not in {1}:".format(first, second)
-    for item in item_list:
-        print "# {0:>12}: {1}".format(item[0], item[1][0])
+
+    if not output_xml:
+        print "# WARNING: Objects in {0} but not in {1}:".format(first, second)
+        for item in item_list:
+            print "# {0:>12}: {1}".format(item[0], item[1][0])
+
     return item_list
 
 
@@ -256,24 +262,26 @@ def get_common_objects(server1, server2, db1, db2,
 
         output = Output()
 
-        a = print_missing_list(in_db1_not_db2, server1_str, server2_str)
-        b = print_missing_list(in_db2_not_db1, server2_str, server1_str)
+        a = print_missing_list(in_db1_not_db2, server1_str, server2_str, options)
+        b = print_missing_list(in_db2_not_db1, server2_str, server1_str, options)
 
         missing = output.xml.new_tag("missing")
 
-        for item in a:
-            element = item[0]
-            name    = item[1][0]
+        if a:
+            for item in a:
+                element = item[0]
+                name    = item[1][0]
 
-            elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, host=server2.host)
-            missing.insert(1, elementTag)
+                elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, host=server2.host)
+                missing.insert(1, elementTag)
 
-        for item in b:
-            element = item[0]
-            name    = item[1][0]
+        if b:
+            for item in b:
+                element = item[0]
+                name    = item[1][0]
 
-            elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, host=server1.host)
-            missing.insert(1, elementTag)
+                elementTag = output.xml.new_tag("element", type=lower(element), identifier=name, host=server1.host)
+                missing.insert(1, elementTag)
 
         output.xml.out.insert(1, missing)
     
@@ -510,8 +518,10 @@ def diff_objects(server1, server2, object1, object2, options):
 
     object1_create = get_create_object(server1, object1, options)
     object2_create = get_create_object(server2, object2, options)
+
+    output_xml = options.get("output-xml", False)
     
-    if not quiet:
+    if not quiet and not output_xml:
         msg = "# Comparing {0} to {1} ".format(object1, object2)
         print msg,
         linelen = width - (len(msg) + 10)
@@ -567,26 +577,28 @@ def diff_objects(server1, server2, object1, object2, options):
         # more than the database name or we missed something. Send a
         # warning to the user.
 
-        if not quiet:
-            print "[FAIL]"
+        if not output_xml:
+            if not quiet:
+                print "[FAIL]"
 
-        for line in diff_list:
-            print line
-        
+            for line in diff_list:
+                print line
+
         return diff_list
 
     if len(diff_list) > 0:
-        if not quiet:
-            print "[FAIL]"
-            
-        if not quiet or \
-           (not options.get("suppress_sql", False) and difftype == 'sql'):
-            for line in diff_list:
-                print "# " + line
+        if not output_xml:
+            if not quiet:
+                print "[FAIL]"
+
+            if not quiet or \
+               (not options.get("suppress_sql", False) and difftype == 'sql'):
+                for line in diff_list:
+                    print "# " + line
 
         return diff_list
     
-    if not quiet:
+    if not quiet and not output_xml:
         print "[PASS]"
 
     return None
