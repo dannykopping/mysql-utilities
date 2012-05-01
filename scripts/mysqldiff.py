@@ -153,7 +153,8 @@ for argument in args:
         try:
             res = database_diff(server1_values, server2_values, db1, db2, options)
         except UtilError, e:
-            print "ERROR:", e.errmsg
+            if not opt.output_xml:
+                print "ERROR:", e.errmsg
             exit(1)
         except Exception, e:
             print e
@@ -162,7 +163,7 @@ for argument in args:
             diff_failed = True
 
 if diff_failed:
-    if not opt.quiet:
+    if not opt.quiet and not opt.output_xml:
         print "Compare failed. One or more differences found."
 
     if opt.output_xml:
@@ -170,7 +171,7 @@ if diff_failed:
 
     exit(1)            
 
-if not opt.quiet:
+if not opt.quiet and not opt.output_xml:
     print "Success. All objects are the same."
 
 if opt.output_xml:

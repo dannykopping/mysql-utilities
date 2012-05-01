@@ -110,6 +110,7 @@ def get_create_object(server, object_name, options):
 
     verbosity = options.get("verbosity", 0)
     quiet = options.get("quiet", False)
+    output_xml = options.get("output-xml", False)
 
     object = object_name.split(".")
     
@@ -129,7 +130,7 @@ def get_create_object(server, object_name, options):
                               format(object_name))
     create_stmt = db.get_create_statement(object[0], object[1], obj_type)
         
-    if verbosity > 0 and not quiet:
+    if verbosity > 0 and not quiet and not output_xml:
         print "\n# Definition for object {0}:".format(object_name)
         print create_stmt 
 
