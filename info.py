@@ -32,7 +32,10 @@ META_INFO = {
 
 INSTALL = {
     'packages': [
+        'bs4',
+        'bs4.builder',
         'mysql',
+        'mysql.connector',
         'mysql.utilities',
         'mysql.utilities.command',
         'mysql.utilities.common',
