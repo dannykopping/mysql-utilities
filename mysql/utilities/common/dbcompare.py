@@ -595,7 +595,7 @@ def diff_objects(server1, server2, object1, object2, options):
             if not quiet or \
                (not options.get("suppress_sql", False) and difftype == 'sql'):
                 for line in diff_list:
-                    print "# " + line
+                    print line
 
         return diff_list
     
