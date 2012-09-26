@@ -25,6 +25,7 @@ import optparse
 import os
 import re
 import sys
+from bs4.element import CData
 from mysql.utilities.command.diff import object_diff, database_diff
 from mysql.utilities.common.options import parse_connection, add_difftype
 from mysql.utilities.common.options import add_verbosity, check_verbosity
@@ -123,7 +124,7 @@ if len(args) == 0:
 # run the diff
 diff_failed = False
 for argument in args:
-    m_obj = re.match("(\w+)(?:\.(\w+))?:(\w+)(?:\.(\w+))?", argument)
+    m_obj = re.match("([\w\-\_]+)(?:\.([\w\-\_]+))?:([\w\-\_]+)(?:\.([\w\-\_]+))?", argument)
     if not m_obj:
         parser.error("Invalid format for object compare argument. "
                       "Format should be: db1.object:db2:object or db1:db2.")
@@ -155,6 +156,11 @@ for argument in args:
         except UtilError, e:
             if not opt.output_xml:
                 print "ERROR:", e.errmsg
+            else:
+                error = output.xml.new_tag("error")
+                error.insert(1, CData(e.errmsg))
+                output.xml.out.insert(1, error)
+                print output.xml.prettify()
             exit(1)
         except Exception, e:
             print e
