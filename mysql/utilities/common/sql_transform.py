@@ -886,9 +886,9 @@ class SQLTransformer(object):
         from mysql.utilities.common.table import Table
 
         # Get the Table instances
-        self.dest_tbl = Table(self.destination_db.source, "%s.%s" %
+        self.dest_tbl = Table(self.destination_db.source, "`%s`.`%s`" %
                              (dest_db, dest_name))
-        self.src_tbl = Table(self.source_db.source, "%s.%s" %
+        self.src_tbl = Table(self.source_db.source, "`%s`.`%s`" %
                              (src_db, src_name))
         
         drop_indexes = []

@@ -543,9 +543,9 @@ class Database(object):
 
         row = None
         if obj_type == _DATABASE:
-            name_str = name
+            name_str = "`" + name + "`"
         else:
-            name_str = db + "." + name
+            name_str = "`" + db + "`.`" + name + "`"
         row = self.source.exec_query("SHOW CREATE %s %s" % \
                                      (obj_type, name_str))
 
