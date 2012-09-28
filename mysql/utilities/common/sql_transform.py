@@ -433,7 +433,7 @@ class SQLTransformer(object):
         # build a list of the parts
         statement_parts = [
             # rename
-            { 'fmt' : "RENAME TO %s.%s \n", 'col' : _IGNORE_COLUMN, 'val' : "" },
+            { 'fmt' : "RENAME TO `%s`.`%s` \n", 'col' : _IGNORE_COLUMN, 'val' : "" },
             # engine
             { 'fmt' : "ENGINE=%s", 'col' : _TABLE_ENGINE, 'val' : "" },
             # auto increment
@@ -768,9 +768,9 @@ class SQLTransformer(object):
         from mysql.utilities.common.table import Table
 
         # Get the Table instances
-        self.dest_tbl = Table(self.destination_db.source, "%s.%s" %
+        self.dest_tbl = Table(self.destination_db.source, "`%s`.`%s`" %
                               (dest_db, dest_name))
-        self.src_tbl = Table(self.source_db.source, "%s.%s" %
+        self.src_tbl = Table(self.source_db.source, "`%s`.`%s`" %
                              (src_db, src_name))
         
         drop_constraints = []
@@ -1068,7 +1068,7 @@ class SQLTransformer(object):
             # security
             { 'fmt' : " SQL SECURITY %s", 'col' : _VIEW_SECURITY, 'val' : "" },
             # object type and name
-            { 'fmt' : " VIEW %s.%s", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " VIEW `%s`.`%s`", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_VIEW_DB],
                        self.destination[_VIEW_NAME]) },
             # definition
@@ -1125,7 +1125,7 @@ class SQLTransformer(object):
             # definer
             { 'fmt' : " DEFINER=%s", 'col' : _TRIGGER_DEFINER, 'val' : "" },
             # object name
-            { 'fmt' : " TRIGGER %s.%s", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " TRIGGER `%s`.`%s`", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_TRIGGER_DB],
                        self.destination[_TRIGGER_NAME]) },
             # trigger timing
@@ -1181,7 +1181,7 @@ class SQLTransformer(object):
             # definer
             { 'fmt' : " DEFINER=%s", 'col' : _ROUTINE_DEFINER, 'val' : "" },
             # object type and name
-            { 'fmt' : " %s %s.%s", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " %s `%s`.`%s`", 'col' : _IGNORE_COLUMN,
               'val' : (self.obj_type.upper(), self.destination[_ROUTINE_DB],
                        self.destination[_ROUTINE_NAME]) },
             # parameters
@@ -1263,7 +1263,7 @@ class SQLTransformer(object):
             # type
             { 'fmt' : " %s", 'col' : _IGNORE_COLUMN, 'val' : "EVENT" },
             # object name
-            { 'fmt' : " %s.%s", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " `%s`.`%s`", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_EVENT_DB],
                        self.destination[_EVENT_NAME]) },
             # schedule - will be filled in later

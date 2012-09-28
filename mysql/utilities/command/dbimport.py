@@ -529,7 +529,7 @@ def _build_create_objects(obj_type, db, definitions):
                 tbl = "*"
             elif tbl.upper() == "NONE":
                 tbl = "*"
-            create_str = "GRANT %s ON %s.%s TO %s" % (priv, db, tbl, user)
+            create_str = "GRANT %s ON `%s`.`%s` TO %s" % (priv, db, tbl, user)
             create_strings.append(create_str)
         elif obj_type == "RPL_COMMAND":
             create_strings.append([defn])

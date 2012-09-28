@@ -232,7 +232,7 @@ class Database(object):
         # Grants are a different animal!
         if obj_type == _GRANT:
             if obj[3]:
-                create_str = "GRANT %s ON %s.%s TO %s" % \
+                create_str = "GRANT %s ON `%s`.`%s` TO %s" % \
                              (obj[1], self.new_db, obj[3], obj[0])
             else:
                 create_str = "GRANT %s ON %s.* TO %s" % \
@@ -318,9 +318,9 @@ class Database(object):
         """
 
         if self.verbose:
-            print "# Dropping new object %s %s.%s" % \
+            print "# Dropping new object %s `%s`.`%s`" % \
                   (obj_type, self.new_db, name)
-        drop_str = "DROP %s %s.%s" % \
+        drop_str = "DROP %s `%s`.`%s`" % \
                    (obj_type, self.new_db, name)
         # Suppress the error on drop
         if self.cloning:
@@ -353,12 +353,12 @@ class Database(object):
 
         create_str = None
         if obj_type == _TABLE and self.cloning:
-            create_str = "CREATE TABLE %s.%s LIKE %s.%s" % \
+            create_str = "CREATE TABLE `%s`.`%s` LIKE `%s`.`%s`" % \
                          (self.new_db, obj[0], self.db_name, obj[0])
         else:
             create_str = self.__make_create_statement(obj_type, obj)
         if obj_type == _TABLE:
-            tbl_name = "%s.%s" % (self.new_db, obj[0])
+            tbl_name = "`%s`.`%s`" % (self.new_db, obj[0])
             create_str = self.destination.substitute_engine(tbl_name,
                                                             create_str,
                                                             new_engine,
@@ -370,7 +370,7 @@ class Database(object):
                 if show_grant_msg:
                     print "%s GRANTS from %s" % (str, self.db_name)
             else:
-                print "%s %s %s.%s" % \
+                print "%s %s `%s`.`%s`" % \
                       (str, obj_type, self.db_name, obj[0])
             if self.verbose:
                 print create_str
@@ -517,8 +517,8 @@ class Database(object):
         table_names = [obj[0] for obj in self.get_db_objects(_TABLE)]
         for tblname in table_names:
             if not quiet:
-                print "# Copying data for TABLE %s.%s" % (self.db_name, tblname)
-            tbl = Table(self.source, "%s.%s" % (self.db_name, tblname),
+                print "# Copying data for TABLE `%s`.`%s`" % (self.db_name, tblname)
+            tbl = Table(self.source, "`%s`.`%s`" % (self.db_name, tblname),
                         tbl_options)
             if tbl is None:
                 raise UtilDBError("Cannot create table object before copy.",

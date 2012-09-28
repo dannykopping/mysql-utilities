@@ -71,7 +71,7 @@ def get_copy_lock(server, db_list, options, include_mysql=False,
             source_db = Database(server, db)
             tables = source_db.get_db_objects("TABLE")
             for table in tables:
-                table_lock_list.append(("%s.%s" % (db, table[0]),
+                table_lock_list.append(("`%s`.`%s`" % (db, table[0]),
                                         'READ'))
                 # Cloning requires issuing WRITE locks because we use same conn.
                 # Non-cloning will issue WRITE lock on a new destination conn.
@@ -82,13 +82,13 @@ def get_copy_lock(server, db_list, options, include_mysql=False,
                         db_clone = db_name[1]
                     # For cloning, we use the same connection so we need to
                     # lock the destination tables with WRITE.
-                    table_lock_list.append(("%s.%s" % (db_clone, table[0]),
+                    table_lock_list.append(("`%s`.`%s`" % (db_clone, table[0]),
                                             'WRITE'))
             # We must include views for server version 5.6.5 and higher
             if server.check_version_compat(5, 6, 5):
                 tables = source_db.get_db_objects("VIEW")
                 for table in tables:
-                    table_lock_list.append(("%s.%s" % (db, table[0]),
+                    table_lock_list.append(("`%s`.`%s`" % (db, table[0]),
                                             'READ'))
                     # Cloning requires issuing WRITE locks because we use same conn.
                     # Non-cloning will issue WRITE lock on a new destination conn.
@@ -99,7 +99,7 @@ def get_copy_lock(server, db_list, options, include_mysql=False,
                             db_clone = db_name[1]
                         # For cloning, we use the same connection so we need to
                         # lock the destination tables with WRITE.
-                        table_lock_list.append(("%s.%s" % (db_clone, table[0]),
+                        table_lock_list.append(("`%s`.`%s`" % (db_clone, table[0]),
                                                 'WRITE'))
                 
                     

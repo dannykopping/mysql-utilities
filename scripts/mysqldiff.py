@@ -138,8 +138,8 @@ for argument in args:
     if obj1 is not None:
         try:
             diff = object_diff(server1_values, server2_values,
-                               "%s.%s" % (db1, obj1),
-                               "%s.%s" % (db2, obj2), options)
+                               "`%s`.`%s`" % (db1, obj1),
+                               "`%s`.`%s`" % (db2, obj2), options)
         except UtilError, e:
             print "ERROR:", e.errmsg
             exit(1)

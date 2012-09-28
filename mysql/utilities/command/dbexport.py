@@ -112,7 +112,7 @@ def export_metadata(source, src_val, db_list, options):
                     if not quiet:
                         print "# Grant:"
                     if dbobj[1][3]:
-                        create_str = "GRANT %s ON %s.%s TO %s" % \
+                        create_str = "GRANT %s ON `%s`.`%s` TO %s" % \
                                      (dbobj[1][1], db_name,
                                       dbobj[1][3], dbobj[1][0])
                     else:
@@ -123,7 +123,7 @@ def export_metadata(source, src_val, db_list, options):
                     print create_str
                 else:
                     if not quiet:
-                        print "# %s: %s.%s" % (dbobj[0], db_name,
+                        print "# %s: `%s`.`%s`" % (dbobj[0], db_name,
                                                dbobj[1][0])
                     if (dbobj[0] == "PROCEDURE" and not skip_procs) or \
                        (dbobj[0] == "FUNCTION" and not skip_funcs) or \
@@ -209,7 +209,7 @@ def _export_row(data_rows, cur_table, format, single, skip_blobs, first=False,
 
     tbl_name = cur_table.tbl_name
     db_name = cur_table.db_name
-    full_name = "%s.%s" % (db_name, tbl_name)
+    full_name = "`%s`.`%s`" % (db_name, tbl_name)
     list_options = {}
     # if outfile is not set, use stdout.
     if outfile is None:
@@ -345,7 +345,7 @@ def export_data(source, src_val, db_list, options):
     old_db = ""
     for table in table_list:
         db_name = table[0]
-        tbl_name = "%s.%s" % (db_name, table[1])
+        tbl_name = "`%s`.`%s`" % (db_name, table[1])
         if not quiet and old_db != db_name:
             old_db = db_name
             if format == "sql":

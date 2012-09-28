@@ -203,7 +203,7 @@ class Index(object):
 
         if self.name == "PRIMARY":
            return None
-        query_str = "ALTER TABLE %s.%s DROP INDEX %s" % \
+        query_str = "ALTER TABLE `%s`.`%s` DROP INDEX %s" % \
                     (self.db, self.table, self.name)
         return query_str
 
@@ -236,7 +236,7 @@ class Index(object):
         """
 
         if self.name == "PRIMARY":
-            print "ALTER TABLE %s.%s ADD PRIMARY KEY (%s)" % \
+            print "ALTER TABLE `%s`.`%s` ADD PRIMARY KEY (%s)" % \
                   (self.db, self.table, self.__get_column_list())
         else:
             create_str = "CREATE "
@@ -244,7 +244,7 @@ class Index(object):
                 create_str += "UNIQUE "
             if self.type == "FULLTEXT":
                 create_str += "FULLTEXT "
-            create_str += "INDEX %s ON %s.%s (%s) " % \
+            create_str += "INDEX %s ON `%s`.`%s` (%s) " % \
                   (self.name, self.db, self.table, self.__get_column_list())
             if (self.type == "BTREE") or (self.type == "RTREE"):
                 create_str += "USING %s" % (self.type)
@@ -316,7 +316,7 @@ class Table(object):
         if self.max_packet_size > _MAXPACKET_SIZE:
             self.max_packet_size = _MAXPACKET_SIZE
 
-        self._insert = "INSERT INTO %s.%s VALUES "
+        self._insert = "INSERT INTO `%s`.`%s` VALUES "
         self.query_options = {  # Used for skipping fetch of rows
             'fetch' : False
         }
@@ -414,7 +414,7 @@ class Table(object):
         if self.column_format is None:
             self.get_column_metadata()
 
-        blob_insert = "UPDATE %s.%s SET " % (new_db, name)
+        blob_insert = "UPDATE `%s`.`%s` SET " % (new_db, name)
         where_values = []
         do_commas = False
         has_data = False
@@ -603,7 +603,7 @@ class Table(object):
         dest.connect()
 
         # Issue the write lock
-        lock_list = [("%s.%s" % (new_db, self.tbl_name), 'WRITE')]
+        lock_list = [("`%s`.`%s`" % (new_db, self.tbl_name), 'WRITE')]
         my_lock = Lock(dest, lock_list, {'locking':'lock-all',})
                     
         # First, turn off foreign keys if turned on
@@ -685,7 +685,7 @@ class Table(object):
 
         new_db[in]         New database name for the table
         """
-        query_str = "INSERT INTO %s.%s SELECT * FROM %s.%s" % \
+        query_str = "INSERT INTO `%s`.`%s` SELECT * FROM `%s`.`%s`" % \
                     (new_db, self.tbl_name, self.db_name, self.tbl_name)
         if self.verbose and not self.vquiet:
             print query_str

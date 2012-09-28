@@ -911,7 +911,7 @@ class Tag(PageElement):
         return self.find_all(*args, **kwargs)
 
     def __getattr__(self, tag):
-        #print "Getattr %s.%s" % (self.__class__, tag)
+        #print "Getattr `%s`.`%s`" % (self.__class__, tag)
         if len(tag) > 3 and tag.endswith('Tag'):
             # BS3: soup.aTag -> "soup.find("a")
             tag_name = tag[:-3]
