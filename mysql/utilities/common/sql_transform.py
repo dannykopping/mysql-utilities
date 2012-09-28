@@ -290,7 +290,7 @@ class SQLTransformer(object):
             # preamble
             { 'fmt' : "%s", 'col' : _IGNORE_COLUMN, 'val' : "ALTER DATABASE" },
             # object name
-            { 'fmt' : " %s", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " `%s`", 'col' : _IGNORE_COLUMN,
               'val' : self.destination[_DB_NAME] },
             # charset
             { 'fmt' : " CHARACTER SET %s", 'col' : _DB_CHARSET, 'val' : "" },
@@ -971,7 +971,7 @@ class SQLTransformer(object):
             # preamble
             { 'fmt' : "%s", 'col' : _IGNORE_COLUMN, 'val' : "ALTER TABLE" },
             # object name
-            { 'fmt' : " %s.%s", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " `%s`.`%s`", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_TABLE_DEF][_TABLE_DB],
                        self.destination[_TABLE_DEF][_TABLE_NAME]) },
             # alter clauses - will be completed later
