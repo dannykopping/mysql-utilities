@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 from mysql.utilities.exception import UtilError, MUTLibError
@@ -12,7 +26,7 @@ class test(mutlib.System_test):
 
     def check_prerequisites(self):
         self.server_list = [None, None, None, None, None, None, None]
-        self.start_port_replacement_list = 3310
+        self.port_repl = []
         return self.check_num_servers(1)
 
     def get_server(self, name):
@@ -54,6 +68,12 @@ class test(mutlib.System_test):
         self.server_list[6] = self.get_server("multi_master2")
         if self.server_list[6] is None:
             return False
+        self.port_repl.append(self.server_list[1].port)
+        self.port_repl.append(self.server_list[2].port)
+        self.port_repl.append(self.server_list[3].port)
+        self.port_repl.append(self.server_list[4].port)
+        self.port_repl.append(self.server_list[5].port)
+        self.port_repl.append(self.server_list[6].port)
 
         return True
 
@@ -71,7 +91,7 @@ class test(mutlib.System_test):
         slave_leaf = " --slave=%s" % \
                      self.build_connection_string(self.server_list[4])
 
-        cmd_str = "mysqlrplshow.py " + master_str
+        cmd_str = "mysqlrplshow.py --disco=root:root " + master_str
 
         comment = "Test case 1 - show topology of master with no slaves"
         cmd_opts = "  --show-list --recurse "
@@ -94,7 +114,7 @@ class test(mutlib.System_test):
         except UtilError, e:
             raise MUTLibError(e.errmsg)
 
-        cmd_str = "mysqlrplshow.py " + master_str
+        cmd_str = "mysqlrplshow.py --disco=root:root " + master_str
 
         comment = "Test case 2 - show topology"
         cmd_opts = "  --show-list --recurse "
@@ -143,7 +163,7 @@ class test(mutlib.System_test):
             raise MUTLibError(e.errmsg)
 
         comment = "Test case 5 - show topology with master:master replication"
-        cmd_str = "mysqlrplshow.py --master=%s " % \
+        cmd_str = "mysqlrplshow.py --master=%s --disco=root:root " % \
                   self.build_connection_string(self.server_list[5])
         cmd_opts = "  --show-list --recurse "
         res = mutlib.System_test.run_test_case(self, 0, cmd_str+cmd_opts,
@@ -151,21 +171,48 @@ class test(mutlib.System_test):
         if not res:
             raise MUTLibError("%s: failed" % comment)
             
+        # Here we need to kill one of the servers to show that the
+        # phantom server error from a stale SHOW SLAVE HOSTS is
+        # fixed and the slave does *not* show on the graph.
+
+        self.servers.stop_server(self.server_list[4])
+        self.servers.remove_server(self.server_list[4])
+        self.server_list[4] = None
+
+        # This shows there is indeed stale data in the view
+        res = self.server_list[3].exec_query("SHOW SLAVE HOSTS")
+        self.results.append("Test case 6 : SHOW SLAVE HOSTS contains %d row.\n" %
+                            len(res))
+
+        comment = "Test case 6 - show topology with phantom slave"
+        cmd_str = "mysqlrplshow.py --disco=root:root " + relay_slave_master
+        cmd_opts = "  --show-list "
+        res = mutlib.System_test.run_test_case(self, 0, cmd_str+cmd_opts,
+                                               comment)
+
         self.do_replacements()
             
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+
         for i in range(6,0,-1):
             self.stop_replication(self.server_list[i])
         
         return True
     
     def do_replacements(self):
+        self.replace_substring(" (28000)", "")
         self.replace_substring("127.0.0.1", "localhost")
-        port = self.start_port_replacement_list
-        for i in range(1,7):
-            if self.server_list[i] is not None:
-                self.replace_substring("%s" % self.server_list[i].port,
-                                       str(port))
-            port += 1
+        i = 1
+        for port in self.port_repl:
+            self.replace_substring("%s" % port, "PORT%d" % i)
+            i += 1
+        self.replace_result("Error connecting to a slave",
+                            "Error connecting to a slave ...\n")
+        self.replace_result("Error 2002: Can't connect to",
+                            "Error ####: Can't connect to local MySQL server\n")
+        self.replace_result("Error 2003: Can't connect to",
+                            "Error ####: Can't connect to local MySQL server\n")
 
     def get_result(self):
         return self.compare(__name__, self.results)

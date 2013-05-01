@@ -7,6 +7,7 @@ Checking for binary logging on master                                [pass]
 Are there binlog exceptions?                                         [pass]
 Replication user exists?                                             [pass]
 Checking server_id values                                            [pass]
+Checking server_uuid values                                          [pass]
 Is slave connected to master?                                        [pass]
 Check master information file                                        [pass]
 Checking InnoDB compatibility                                        [pass]
@@ -27,6 +28,11 @@ Checking server_id values                                            [pass]
  master id = XXXXX
   slave id = XXXXX
 
+Checking server_uuid values                                          [pass]
+
+ master uuid = XXXXX
+  slave uuid = XXXXX
+
 Is slave connected to master?                                        [pass]
 Check master information file                                        [pass]
 
@@ -46,6 +52,7 @@ Check master information file                                        [pass]
                Master_SSL_Cert : 
              Master_SSL_Cipher : 
                 Master_SSL_Key : 
+ Master_SSL_Verify_Server_Cert : 0
 
 Checking InnoDB compatibility                                        [pass]
 Checking storage engines compatibility                               [pass]
@@ -65,6 +72,7 @@ Checking for binary logging on master                                [pass]
 Are there binlog exceptions?                                         [pass]
 Replication user exists?                                             [pass]
 Checking server_id values                                            [pass]
+Checking server_uuid values                                          [pass]
 Is slave connected to master?                                        [pass]
 Check master information file                                        [pass]
 Checking InnoDB compatibility                                        [pass]
@@ -113,4 +121,55 @@ Checking slave delay (seconds behind master)                         [pass]
                  Last_IO_Error : 
                 Last_SQL_Errno : 0
                 Last_SQL_Error : 
+# ...done.
+Test case 4 - normal run with loopback
+# master on localhost: ... connected.
+# slave on localhost: ... connected.
+Test Description                                                     Status
+---------------------------------------------------------------------------
+Checking for binary logging on master                                [pass]
+Are there binlog exceptions?                                         [pass]
+Replication user exists?                                             [pass]
+Checking server_id values                                            [pass]
+Checking server_uuid values                                          [pass]
+Is slave connected to master?                                        [pass]
+Check master information file                                        [pass]
+Checking InnoDB compatibility                                        [pass]
+Checking storage engines compatibility                               [pass]
+Checking lower_case_table_names settings                             [pass]
+Checking slave delay (seconds behind master)                         [pass]
+# ...done.
+Test case 5 - normal run with grant for rpl@'%'
+# master on localhost: ... connected.
+# slave on localhost: ... connected.
+Test Description                                                     Status
+---------------------------------------------------------------------------
+Checking for binary logging on master                                [pass]
+Are there binlog exceptions?                                         [pass]
+Replication user exists?                                             [pass]
+Checking server_id values                                            [pass]
+Checking server_uuid values                                          [pass]
+Is slave connected to master?                                        [pass]
+Check master information file                                        [pass]
+Checking InnoDB compatibility                                        [pass]
+Checking storage engines compatibility                               [pass]
+Checking lower_case_table_names settings                             [pass]
+Checking slave delay (seconds behind master)                         [pass]
+# ...done.
+Test case 6 - normal run with grant with wildcard rpl@'local%'
+# master on localhost: ... connected.
+# slave on localhost: ... connected.
+Test Description                                                     Status
+---------------------------------------------------------------------------
+Checking for binary logging on master                                [pass]
+Are there binlog exceptions?                                         [pass]
+Replication user exists?                                             [pass]
+Checking server_id values                                            [pass]
+Checking server_uuid values                                          [pass]
+Is slave connected to master?                                        [pass]
+Check master information file                                        [pass]
+Checking InnoDB compatibility                                        [pass]
+Checking storage engines compatibility                               [pass]
+Checking lower_case_table_names settings                             [pass]
+Checking slave delay (seconds behind master)                         [pass]
 # ...done.

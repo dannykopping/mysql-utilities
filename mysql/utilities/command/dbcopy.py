@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # Copyright (c) 2010, 2012 Oracle and/or its affiliates. All rights reserved.
 #
@@ -21,10 +20,24 @@ This file contains the copy database operation which ensures a database
 is exactly the same among two servers.
 """
 
-import sys
 from mysql.utilities.exception import UtilError
 
 _RPL_COMMANDS, _RPL_FILE = 0, 1
+
+_GTID_WARNING = "# WARNING: The server supports GTIDs but you have " + \
+    "elected to skip exexcuting the GTID_EXECUTED statement. Please refer " + \
+    "to the MySQL online reference manual for more information about how " + \
+    "to handle GTID enabled servers with backup and restore operations."
+_GTID_BACKUP_WARNING = "# WARNING: A partial copy from a server that has " + \
+    "GTIDs enabled will by default include the GTIDs of all transactions, " + \
+    "even those that changed suppressed parts of the database. If you " + \
+    "don't want to generate the GTID statement, use the --skip-gtid " + \
+    "option. To export all databases, use the --all option and do not " + \
+    "specify a list of databases."
+_NON_GTID_WARNING = "# WARNING: The %s server does not support " + \
+    "GTIDs yet the %s server does support GTIDs. To suppress this " + \
+    "warning, use the --skip-gtid option when copying %s a non-GTID " + \
+    "enabled server."
 
 def get_copy_lock(server, db_list, options, include_mysql=False,
                   cloning=False):
@@ -71,7 +84,7 @@ def get_copy_lock(server, db_list, options, include_mysql=False,
             source_db = Database(server, db)
             tables = source_db.get_db_objects("TABLE")
             for table in tables:
-                table_lock_list.append(("`%s`.`%s`" % (db, table[0]),
+                table_lock_list.append(("%s.%s" % (db, table[0]),
                                         'READ'))
                 # Cloning requires issuing WRITE locks because we use same conn.
                 # Non-cloning will issue WRITE lock on a new destination conn.
@@ -82,13 +95,13 @@ def get_copy_lock(server, db_list, options, include_mysql=False,
                         db_clone = db_name[1]
                     # For cloning, we use the same connection so we need to
                     # lock the destination tables with WRITE.
-                    table_lock_list.append(("`%s`.`%s`" % (db_clone, table[0]),
+                    table_lock_list.append(("%s.%s" % (db_clone, table[0]),
                                             'WRITE'))
-            # We must include views for server version 5.6.5 and higher
-            if server.check_version_compat(5, 6, 5):
+            # We must include views for server version 5.5.3 and higher
+            if server.check_version_compat(5, 5, 3):
                 tables = source_db.get_db_objects("VIEW")
                 for table in tables:
-                    table_lock_list.append(("`%s`.`%s`" % (db, table[0]),
+                    table_lock_list.append(("%s.%s" % (db, table[0]),
                                             'READ'))
                     # Cloning requires issuing WRITE locks because we use same conn.
                     # Non-cloning will issue WRITE lock on a new destination conn.
@@ -99,7 +112,7 @@ def get_copy_lock(server, db_list, options, include_mysql=False,
                             db_clone = db_name[1]
                         # For cloning, we use the same connection so we need to
                         # lock the destination tables with WRITE.
-                        table_lock_list.append(("`%s`.`%s`" % (db_clone, table[0]),
+                        table_lock_list.append(("%s.%s" % (db_clone, table[0]),
                                                 'WRITE'))
                 
                     
@@ -194,6 +207,7 @@ def copy_db(src_val, dest_val, db_list, options):
     from mysql.utilities.common.options import check_engine_options
     from mysql.utilities.common.server import connect_servers
     from mysql.utilities.command.dbexport import get_change_master_command
+    from mysql.utilities.command.dbexport import get_gtid_commands
 
     verbose = options.get("verbose", False)
     quiet = options.get("quiet", False)
@@ -205,6 +219,7 @@ def copy_db(src_val, dest_val, db_list, options):
     skip_data = options.get("skip_data", False)
     skip_triggers = options.get("skip_triggers", False)
     skip_tables = options.get("skip_tables", False)
+    skip_gtid = options.get("skip_gtid", False)
     locking = options.get("locking", "snapshot")
 
     rpl_info = ([], None)
@@ -214,12 +229,17 @@ def copy_db(src_val, dest_val, db_list, options):
         'version'   : "5.1.30",
     }
     servers = connect_servers(src_val, dest_val, conn_options)
-
-    source = servers[0]
-    destination = servers[1]
-
     cloning = (src_val == dest_val) or dest_val is None
     
+    source = servers[0]
+    if cloning:
+        destination = servers[0]
+    else:
+        destination = servers[1]
+    
+    src_gtid = source.supports_gtid() == 'ON'
+    dest_gtid = destination.supports_gtid() == 'ON'if destination else False
+
     # Get list of all databases from source if --all is specified.
     # Ignore system databases.
     if options.get("all", False):
@@ -232,6 +252,17 @@ def copy_db(src_val, dest_val, db_list, options):
                 db_list.append((row[0], None)) # Keep same name
         else:
             raise UtilError("Cannot copy all databases on the same server.")
+    elif not skip_gtid and src_gtid:
+        # Check to see if this is a full copy (complete backup)
+        all_dbs = source.exec_query("SHOW DATABASES")
+        dbs = [db[0] for db in db_list]
+        for db in all_dbs:
+            if db[0].upper() in ["MYSQL", "INFORMATION_SCHEMA",
+                                 "PERFORMANCE_SCHEMA"]:
+                continue
+            if not db[0] in dbs:
+                print _GTID_BACKUP_WARNING
+                break
 
     # Do error checking and preliminary work:
     #  - Check user permissions on source and destination for all databases
@@ -281,6 +312,37 @@ def copy_db(src_val, dest_val, db_list, options):
 
     # Get replication commands if rpl_mode specified.
     # if --rpl specified, dump replication initial commands
+    rpl_info = None
+
+    # Turn off foreign keys if they were on at the start
+    destination.disable_foreign_key_checks(True)
+
+    # Get GTID commands
+    new_opts = options.copy()
+    if not skip_gtid:
+        gtid_info = get_gtid_commands(source, new_opts)
+        if src_gtid and not dest_gtid:
+            print _NON_GTID_WARNING % ("destination", "source", "to")
+        elif not src_gtid and dest_gtid:
+            print _NON_GTID_WARNING % ("source", "destination", "from")
+    else:
+        gtid_info = None
+        if src_gtid and not cloning:
+            print _GTID_WARNING
+        
+    # If cloning, turn off gtid generation
+    if gtid_info and cloning:
+        gtid_info = None
+    # if GTIDs enabled, write the GTID commands
+    if gtid_info and dest_gtid:
+        # Check GTID version for complete feature support
+        destination.check_gtid_version()
+        # Check the gtid_purged value too
+        destination.check_gtid_executed()
+        for cmd in gtid_info[0]:
+            print "# GTID operation:", cmd
+            destination.exec_query(cmd)
+    
     if options.get("rpl_mode", None):
         new_opts = options.copy()
         new_opts['multiline'] = False
@@ -349,6 +411,11 @@ def copy_db(src_val, dest_val, db_list, options):
     if not (cloning and locking == 'lock-all'):
         my_lock.unlock()
 
+    # if GTIDs enabled, write the GTID-related commands
+    if gtid_info and dest_gtid:
+        print "# GTID operation:", gtid_info[1]
+        destination.exec_query(gtid_info[1])
+
     if options.get("rpl_mode", None):
         for cmd in rpl_info[_RPL_COMMANDS]:
             if cmd[0] == '#' and not quiet:
@@ -358,6 +425,9 @@ def copy_db(src_val, dest_val, db_list, options):
                     print cmd
                 destination.exec_query(cmd)
         destination.exec_query("START SLAVE;")
+
+    # Turn on foreign keys if they were on at the start
+    destination.disable_foreign_key_checks(False)
 
     if not quiet:
         print "#...done."

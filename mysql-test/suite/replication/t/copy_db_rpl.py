@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 import replicate
@@ -224,7 +238,7 @@ class test(replicate.test):
         to_conn = "--destination=" + self.build_connection_string(self.server2)
         db_list = ["master_db1"]
 
-        cmd_str = "mysqldbcopy.py %s --rpl-user=rpl:rpl " % " ".join(db_list) + \
+        cmd_str = "mysqldbcopy.py %s --rpl-user=rpl:rpl --skip-gtid " % " ".join(db_list) + \
                   "%s %s " % (from_conn, to_conn)
 
         # Copy master database
@@ -242,7 +256,7 @@ class test(replicate.test):
         to_conn = "--destination=" + self.build_connection_string(self.server3)
         db_list = ["util_test", "master_db1"]
 
-        cmd_str = "mysqldbcopy.py %s --rpl-user=rpl:rpl " % " ".join(db_list) + \
+        cmd_str = "mysqldbcopy.py %s --rpl-user=rpl:rpl --skip-gtid " % " ".join(db_list) + \
                   "%s %s " % (from_conn, to_conn)
 
         # Provision a new slave from master
@@ -259,7 +273,7 @@ class test(replicate.test):
         from_conn = "--source=" + self.build_connection_string(self.server2)
         to_conn = "--destination=" + self.build_connection_string(self.server3)
 
-        cmd_str = "mysqldbcopy.py %s --rpl-user=rpl:rpl " % " ".join(db_list) + \
+        cmd_str = "mysqldbcopy.py %s --rpl-user=rpl:rpl --skip-gtid " % " ".join(db_list) + \
                   "%s %s " % (from_conn, to_conn)
 
         # Provision a new slave from existing slave

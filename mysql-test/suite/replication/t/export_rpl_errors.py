@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import replicate
 import mutlib
@@ -15,6 +29,9 @@ class test(replicate.test):
     """
 
     def check_prerequisites(self):
+        # Check MySQL server version - Must be 5.1.0 or higher
+        if not self.servers.get_server(0).check_version_compat(5, 1, 0):
+            raise MUTLibError("Test requires server version 5.1.0 or higher")
         return replicate.test.check_prerequisites(self)
 
     def setup(self):
@@ -139,7 +156,9 @@ class test(replicate.test):
 
         self.replace_result("CHANGE MASTER", "CHANGE MASTER <goes here>\n")
         self.replace_result("# CHANGE MASTER", "# CHANGE MASTER <goes here>\n")
-    
+        self.replace_substring(str(self.server1.port), "PORT1")
+        self.replace_substring(str(self.server2.port), "PORT2")
+
         return True
 
     def get_result(self):

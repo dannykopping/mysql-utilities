@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
 #
@@ -137,7 +136,7 @@ def _get_db_dir_size(folder):
             if os.path.isfile(itemfolder):
                 total_size += os.path.getsize(itemfolder)
             elif os.path.isdir(itemfolder):
-                total_size += getfolderSize(itemfolder)
+                total_size += _get_db_dir_size(itemfolder)
     return total_size
 
 
@@ -150,23 +149,29 @@ def _find_tablespace_files(folder, verbosity=0):
     """
     total = 0
     tablespaces = []
-    for item in os.listdir(folder):
-        itempath = os.path.join(folder, item)
-        if os.path.isfile(itempath):
+    # skip inaccessible files.
+    try:
+        for item in os.listdir(folder):
+            itempath = os.path.join(folder, item)
             name, ext = os.path.splitext(item)
-            if ext.upper() == "IBD":
-                size = os.path.getsize(itempath)
-                total += size
-                if verbosity > 0:
-                    row = (item, size,'file tablespace', '')
-                else:
-                    row = (item, size)
-
-                tablespaces.append(row)
-        else:
-            subdir, tot = _find_tablespace_files(itempath, verbosity)
-            total += tot
-            tablespaces.extend(subdir)
+            if os.path.isfile(itempath):
+                name, ext = os.path.splitext(item)
+                if ext.upper() == "IBD":
+                    size = os.path.getsize(itempath)
+                    total += size
+                    if verbosity > 0:
+                        row = (item, size,'file tablespace', '')
+                    else:
+                        row = (item, size)
+    
+                    tablespaces.append(row)
+            else:
+                subdir, tot = _find_tablespace_files(itempath, verbosity)
+                if subdir is not None:
+                    total += tot
+                    tablespaces.extend(subdir)
+    except:
+        return (None, None)
 
     return tablespaces, total
 
@@ -427,15 +432,14 @@ def _build_db_list(server, rows, include_list, datadir, format=False,
             # Put in commas and justify strings
             for i in range(0,num_cols):
                 fmt_data[i] = locale.format("%d", row[i+1], grouping=True)
-                fmt_data[i] = "{0:>{1}}".format(dbdir_size, max_col[i])
-                if num_cols == 4: # get all columns
-                    fmt_rows.append((row[0], fmt_data[0], fmt_data[1],
-                                     fmt_data[2], fmt_data[3]))
-                elif num_cols == 3:
-                    fmt_rows.append((row[0], fmt_data[0], fmt_data[1],
-                                     fmt_data[2]))
-                else:
-                    fmt_rows.append((row[0], fmt_data[0]))
+            if num_cols == 4: # get all columns
+                fmt_rows.append((row[0], fmt_data[0], fmt_data[1],
+                                 fmt_data[2], fmt_data[3]))
+            elif num_cols == 3:
+                fmt_rows.append((row[0], fmt_data[0], fmt_data[1],
+                                 fmt_data[2]))
+            else:
+                fmt_rows.append((row[0], fmt_data[0]))
     else:
         fmt_rows = results
 
@@ -454,19 +458,22 @@ def _build_db_list(server, rows, include_list, datadir, format=False,
                     if format:
                         fmt_data = ['','','','','']
                         for i in range(0,num_cols):
-                            fmt_data[i] = locale.format("%d",
-                                                        row[i+1], grouping=True)
-                            fmt_data[i] = "{0:>{1}}".format(dbdir_size,
-                                                            max_col[i])
-                            if num_cols == 4: # get all columns
-                                fmt_rows.insert(0, (db[0], fmt_data[0],
-                                                    fmt_data[1], fmt_data[2],
-                                                    fmt_data[3]))
-                            elif num_cols == 3:
-                                fmt_rows.insert(0, (db[0], fmt_data[0],
-                                                 fmt_data[1], fmt_data[2]))
+                            if type(row[i+1]) == type(int):
+                                fmt_data[i] = locale.format("%s",
+                                                            int(row[i+1]),
+                                                            grouping=True)
                             else:
-                                fmt_rows.insert(0, (db[0], fmt_data[0]))
+                                fmt_data[i] = locale.format("%s", row[i+1],
+                                                            grouping=True)
+                        if num_cols == 4: # get all columns
+                            fmt_rows.insert(0, (db[0], fmt_data[0],
+                                                fmt_data[1], fmt_data[2],
+                                                fmt_data[3]))
+                        elif num_cols == 3:
+                            fmt_rows.insert(0, (db[0], fmt_data[0],
+                                             fmt_data[1], fmt_data[2]))
+                        else:
+                            fmt_rows.insert(0, (db[0], fmt_data[0]))
                     else:
                         if num_cols == 4:
                             fmt_rows.insert(0, (db[0], 0, 0, 0, 0))
@@ -662,8 +669,22 @@ def show_log_usage(server, datadir, options):
         if not quiet:
             print "Current %s file = %s" % (log_type, current_log)
 
-        logs, total = _build_log_list(datadir,
-                                      os.path.splitext(current_log)[0])
+        # As of 5.6.2, users can specify location of binlog and relaylog.
+        if server.check_version_compat(5, 6, 2):
+            if log_type == 'binary log':
+                res = server.show_server_variable("log_bin_basename")[0]
+            else:
+                res = server.show_server_variable("relay_log_basename")[0]
+            parts = os.path.split(res[1])
+            log_path = os.path.join(parts[:len(parts) - 1])[0]
+            log_prefix = parts[len(parts) - 1]
+        else:
+            log_path = datadir
+            log_prefix = os.path.splitext(current_log)[0]
+        if log_path == '':
+            log_path = datadir
+            
+        logs, total = _build_log_list(log_path, log_prefix)
         if logs == []:
             raise UtilError("The %s are missing." % log_type)
 

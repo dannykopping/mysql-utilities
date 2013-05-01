@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import copy_db
 from mysql.utilities.exception import MUTLibError
@@ -43,14 +57,14 @@ class test(copy_db.test):
         from_conn = "--source=" + self.build_connection_string(self.server1)
         to_conn = "--destination=" + self.build_connection_string(self.server2)
 
-        cmd_str = "mysqldbcopy.py %s " % from_conn
+        cmd_str = "mysqldbcopy.py --skip-gtid %s " % from_conn
         cmd_opts = "util_test:util_db_clone "
         comment = "Test case 1 - error: no destination specified"
         res = self.run_test_case(2, cmd_str + cmd_opts, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py %s %s " % (from_conn, to_conn)
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s " % (from_conn, to_conn)
         cmd_opts = " "
         comment = "Test case 2 - error: no database specified"
         res = self.run_test_case(2, cmd_str + cmd_opts, comment)
@@ -69,16 +83,16 @@ class test(copy_db.test):
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py %s " % to_conn
-        cmd_str += "--source=nope:nada@localhost:3306 "
+        cmd_str = "mysqldbcopy.py --skip-gtid %s " \
+                  "--source=nope:nada@localhost:3306 "  % to_conn
         cmd_opts = "util_test:util_db_clone "
         comment = "Test case 5 - error: cannot connect to source"
         res = self.run_test_case(1, cmd_str + cmd_opts, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
         
-        cmd_str = "mysqldbcopy.py %s " % from_conn
-        cmd_str += "--destination=nope:nada@localhost:3306 "
+        cmd_str = "mysqldbcopy.py --skip-gtid %s " \
+                  "--destination=nope:nada@localhost:3306 "  % from_conn
         cmd_opts = "util_test:util_db_clone "
         comment = "Test case 6 - error: cannot connect to destination"
         res = self.run_test_case(1, cmd_str + cmd_opts, comment)
@@ -92,7 +106,7 @@ class test(copy_db.test):
                     (self.server2.port, self.server2.socket)
         else:
             to_conn = "--destination=joe@localhost:%s" % (self.server2.port)
-        cmd_str = "mysqldbcopy.py %s %s " % (from_conn, to_conn)
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s " % (from_conn, to_conn)
         cmd_opts = "util_test:util_db_clone "
         comment = "Test case 7 - users with minimal privileges"
         res = self.run_test_case(0, cmd_str + cmd_opts, comment)
@@ -105,7 +119,7 @@ class test(copy_db.test):
                       (self.server2.port, self.server2.socket)
         else:
             to_conn = "--destination=joe@localhost:%s" % self.server2.port
-        cmd_str = "mysqldbcopy.py %s %s " % (from_conn, to_conn)
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s " % (from_conn, to_conn)
         cmd_opts = "util_test:util_db_clone --force"
         comment = "Test case 8 - source user not enough privileges needed"
         res = self.run_test_case(1, cmd_str + cmd_opts, comment)
@@ -142,7 +156,7 @@ class test(copy_db.test):
                       (self.server2.port, self.server2.socket)
         else:
             to_conn = "--destination=sam@localhost:%s" % self.server2.port
-        cmd_str = "mysqldbcopy.py %s %s " % (from_conn, to_conn)
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s " % (from_conn, to_conn)
         cmd_opts = "util_test:util_db_clone --force "
         comment = "Test case 12 - dest user not enough privileges needed"
         res = self.run_test_case(1, cmd_str + cmd_opts, comment)
@@ -171,53 +185,51 @@ class test(copy_db.test):
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py --source=rocks_rocks_rocks %s " % to_conn
-        cmd_str += "util_test:util_db_clone --force "
+        cmd_str = "mysqldbcopy.py --skip-gtid --source=rocks_rocks_rocks %s " \
+                  "util_test:util_db_clone --force " % to_conn
         comment = "Test case 16 - cannot parse --source"
         res = self.run_test_case(2, cmd_str, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py --destination=rocks_rocks_rocks %s " % \
-                  from_conn
-        cmd_str += "util_test:util_db_clone --force "
+        cmd_str = "mysqldbcopy.py --skip-gtid %s util_test:util_db_clone " \
+                  "--destination=rocks_rocks_rocks --force " % from_conn
         comment = "Test case 17 - cannot parse --destination"
         res = self.run_test_case(2, cmd_str, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py --source=rocks_rocks_rocks "
-        cmd_str += "util_test:util_db_clone --force "
+        cmd_str = "mysqldbcopy.py --skip-gtid --source=rocks_rocks_rocks " \
+                  "util_test:util_db_clone --force "
         comment = "Test case 18 - no destination specified"
         res = self.run_test_case(2, cmd_str, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py %s %s " % (to_conn, from_conn)
-        cmd_str += " "
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s " % (to_conn, from_conn)
         comment = "Test case 19 - no database specified"
         res = self.run_test_case(2, cmd_str, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py %s %s " % (to_conn, from_conn)
-        cmd_str += "util_test:util_db_clone --force "
-        cmd_str += "--new-storage-engine=NOTTHERE"
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s util_test:util_db_clone " \
+                  "--force --new-storage-engine=NOTTHERE" % \
+                   (to_conn, from_conn)
         comment = "Test case 20 - new storage engine missing"
         res = self.run_test_case(0, cmd_str, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py %s %s " % (to_conn, from_conn)
-        cmd_str += "util_test:util_db_clone --force " + \
-                   "--default-storage-engine=NOPENOTHERE"
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s util_test:util_db_clone " \
+                 "--force --default-storage-engine=NOPENOTHERE" % \
+                 (to_conn, from_conn)
         comment = "Test case 21 - default storage engine missing"
         res = self.run_test_case(0, cmd_str, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        cmd_str = "mysqldbcopy.py %s %s " % (to_conn, from_conn)
-        cmd_str += "util_test:util_db_clone --force --all"
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s util_test:util_db_clone " \
+                  "--force --all"  % (to_conn, from_conn)
         comment = "Test case 22 - database listed and --all"
         res = self.run_test_case(2, cmd_str, comment)
         if not res:
@@ -225,7 +237,8 @@ class test(copy_db.test):
 
         # Check --rpl option errors        
         test_num = 23        
-        cmd_str = "mysqldbcopy.py %s %s util_test " % (to_conn, from_conn)
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s util_test " % \
+                  (to_conn, from_conn)
         comment = "Test case %s - error: %s but no --rpl" % \
                   (test_num, "--rpl-user=root")
         res = self.run_test_case(2, cmd_str + "--rpl-user=root", comment)
@@ -242,8 +255,21 @@ class test(copy_db.test):
                             "# Destination: sam@localhost:[] ... connected\n")
 
         # Replace error code.
-        self.replace_result("Error 1045:", "Error XXXX: Access denied\n")
-        self.replace_result("Error 2003:", "Error XXXX: Access denied\n")
+        self.replace_result("Error 1045", "Error XXXX: Access denied\n")
+        self.replace_result("Error 2003", "Error XXXX: Access denied\n")
+        
+        # Ignore GTID messages (skipping GTIDs in this test)
+        self.remove_result("# WARNING: The server supports GTIDs")
+
+        # Replace connection errors
+        self.replace_result("mysqldbcopy.py: error: Source connection "
+                            "values invalid",
+                            "mysqldbcopy.py: error: Source connection "
+                            "values invalid\n")
+        self.replace_result("mysqldbcopy.py: error: Destination connection "
+                            "values invalid",
+                            "mysqldbcopy.py: error: Destination connection "
+                            "values invalid\n")
 
         return True
   

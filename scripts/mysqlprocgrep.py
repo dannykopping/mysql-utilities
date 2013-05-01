@@ -1,18 +1,41 @@
 #!/usr/bin/python
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 
-import getpass
-import optparse
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os.path
 import sys
 
-from mysql.utilities import VERSION_FRM
-from mysql.utilities.command.proc import *
-from mysql.utilities.exception import FormatError, EmptyResultError
-from mysql.utilities.common.options import parse_connection, add_regexp
+from mysql.utilities.command.proc import KILL_CONNECTION
+from mysql.utilities.command.proc import KILL_QUERY
+from mysql.utilities.command.proc import PRINT_PROCESS
+from mysql.utilities.command.proc import USER, HOST, DB, COMMAND, INFO, STATE
+from mysql.utilities.command.proc import ProcessGrep
+
+from mysql.utilities.exception import EmptyResultError
+from mysql.utilities.common.options import add_regexp
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.common.options import add_verbosity
 from mysql.utilities.common.options import add_format_option
-from mysql.utilities.exception import UtilError
+
 
 def add_pattern(option, opt, value, parser, field):
     entry = (field, value)
@@ -93,14 +116,16 @@ try:
     command = ProcessGrep(options.matches, options.actions, options.use_regexp,
                           age=options.age)
     if options.print_sql:
-        print command.sql(options.sql_body).strip()
+        print(command.sql(options.sql_body).strip())
     else:
         command.execute(options.server, format=options.format)
-except EmptyResultError as details:
-    print >>sys.stderr, "No matches"
-    exit(1)
-except Exception as details:
-    print >>sys.stderr, 'ERROR:', details
-    exit(2)
+except EmptyResultError:
+    _, details, _ = sys.exc_info()
+    sys.stderr.write("No matches")
+    sys.exit(1)
+except Exception:
+    _, details, _ = sys.exc_info()
+    sys.stderr.write('ERROR: %s' % details)
+    sys.exit(2)
 
-exit()
+sys.exit()

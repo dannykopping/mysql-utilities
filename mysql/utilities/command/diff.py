@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +20,9 @@ This file contains the diff commands for finding the difference among
 the definitions of two databases.
 """
 
-from mysql.utilities.common.options import parse_connection
+from mysql.utilities.common.sql_transform import is_quoted_with_backticks
+from mysql.utilities.common.sql_transform import quote_with_backticks
+
 
 def object_diff(server1_val, server2_val, object1, object2, options):
     """diff the definition of two objects
@@ -43,12 +44,8 @@ def object_diff(server1_val, server2_val, object1, object2, options):
     """
     from mysql.utilities.common.dbcompare import diff_objects, server_connect
 
-    try:
-        server1, server2 = server_connect(server1_val, server2_val,
+    server1, server2 = server_connect(server1_val, server2_val,
                                       object1, object2, options)
-    except:
-        raise
-
     result = diff_objects(server1, server2, object1, object2, options)
     
     return result
@@ -83,12 +80,10 @@ def database_diff(server1_val, server2_val, db1, db2, options):
     
     force = options.get("force", False)
 
-    try:
-        server1, server2 = server_connect(server1_val, server2_val, db1, db2, options)
-    except:
-        raise
-        
-    in_both, in_db1, in_db2 = get_common_objects(server1, server2, db1, db2, True, options)
+    server1, server2 = server_connect(server1_val, server2_val,
+                                      db1, db2, options)
+    in_both, in_db1, in_db2 = get_common_objects(server1, server2,
+                                                 db1, db2, True, options)
     in_both.sort()
     if (len(in_db1) > 0 or len(in_db2) > 0) and not force:
         return False
@@ -103,8 +98,12 @@ def database_diff(server1_val, server2_val, db1, db2, options):
     # For each that match, do object diff
     success = True
     for item in in_both:
-        object1 = "%s.%s" % (db1, item[1][0])
-        object2 = "%s.%s" % (db2, item[1][0])
+        obj_name1 = quote_with_backticks(item[1][0]) \
+                        if is_quoted_with_backticks(db1) else item[1][0]
+        obj_name2 = quote_with_backticks(item[1][0]) \
+                        if is_quoted_with_backticks(db2) else item[1][0]
+        object1 = "%s.%s" % (db1, obj_name1)
+        object2 = "%s.%s" % (db2, obj_name2)
         result = object_diff(server1, server2, object1, object2, options)
         if result is not None:
             success = False

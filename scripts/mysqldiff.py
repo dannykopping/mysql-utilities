@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,18 +21,26 @@ This file contains the object diff utility which allows users to compare the
 definitions of two objects and return the difference (like diff).
 """
 
-import optparse
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os
 import re
 import sys
-from bs4.element import CData
+
 from mysql.utilities.command.diff import object_diff, database_diff
+from mysql.utilities.common.messages import PARSE_ERR_DB_OBJ_MISSING
+from mysql.utilities.common.messages import PARSE_ERR_DB_OBJ_MISSING_MSG
+from mysql.utilities.common.messages import PARSE_ERR_DB_OBJ_PAIR
+from mysql.utilities.common.messages import PARSE_ERR_DB_OBJ_PAIR_EXT
 from mysql.utilities.common.options import parse_connection, add_difftype
 from mysql.utilities.common.options import add_verbosity, check_verbosity
 from mysql.utilities.common.options import add_changes_for, add_reverse
 from mysql.utilities.common.options import setup_common_options
+from mysql.utilities.exception import FormatError
 from mysql.utilities.exception import UtilError
-from mysql.utilities.common.output import Output
 
 # Constants
 NAME = "MySQL Utilities - mysqldiff "
@@ -42,8 +50,6 @@ USAGE = "%prog --server1=user:pass@host:port:socket " + \
         "--server2=user:pass@host:port:socket db1.object1:db2.object1 db3:db4"
 PRINT_WIDTH = 75
 
-output = Output()
-
 # Setup the command parser
 parser = setup_common_options(os.path.basename(sys.argv[0]),
                               DESCRIPTION, USAGE, False, False)
@@ -51,23 +57,21 @@ parser = setup_common_options(os.path.basename(sys.argv[0]),
 # Connection information for the source server
 parser.add_option("--server1", action="store", dest="server1",
                   type="string", default="root@localhost:3306",
-                  help="connection information for first server in " + \
-                  "the form: <user>:<password>@<host>:<port>:<socket>")
+                  help="connection information for first server in "
+                  "the form: <user>[:<password>]@<host>[:<port>][:<socket>]"
+                  " or <login-path>[:<port>][:<socket>].")
 
 # Connection information for the destination server
 parser.add_option("--server2", action="store", dest="server2",
                   type="string", default=None,
-                  help="connection information for second server in " + \
-                  "the form: <user>:<password>@<host>:<port>:<socket>")
+                  help="connection information for second server in "
+                  "the form: <user>[:<password>]@<host>[:<port>][:<socket>]"
+                  " or <login-path>[:<port>][:<socket>].")
 
 # Add display width option
 parser.add_option("--width", action="store", dest="width",
                   type = "int", help="display width",
                   default=PRINT_WIDTH)
-
-# XML output
-parser.add_option("--xml", action="store_true", dest="output_xml",
-                  help="Output XML report only")
 
 # Force mode
 parser.add_option("--force", action="store_true", dest="force",
@@ -96,7 +100,6 @@ options = {
     "quiet"            : opt.quiet,
     "verbosity"        : opt.verbosity,
     "difftype"         : opt.difftype,
-    "output-xml"       : opt.output_xml,
     "force"            : opt.force,
     "width"            : opt.width,
     "changes-for"      : opt.changes_for,
@@ -105,15 +108,22 @@ options = {
 
 # Parse server connection values
 try:
-    server1_values = parse_connection(opt.server1)
-except:
-    parser.error("Server1 connection values invalid or cannot be parsed.")
-
+    server1_values = parse_connection(opt.server1, None, options)
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Server1 connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Server1 connection values invalid: %s." % err.errmsg)
 if opt.server2 is not None:
     try:
-        server2_values = parse_connection(opt.server2)
-    except:
-        parser.error("Server2 connection values invalid or cannot be parsed.")
+        server2_values = parse_connection(opt.server2, None, options)
+    except FormatError:
+        _, err, _ = sys.exc_info()
+        parser.error("Server2 connection values invalid: %s." % err)
+    except UtilError:
+        _, err, _ = sys.exc_info()
+        parser.error("Server2 connection values invalid: %s." % err.errmsg)
 else:
     server2_values = None
     
@@ -124,64 +134,95 @@ if len(args) == 0:
 # run the diff
 diff_failed = False
 for argument in args:
-    m_obj = re.match("([\w\-\_]+)(?:\.([\w\-\_]+))?:([\w\-\_]+)(?:\.([\w\-\_]+))?", argument)
+    m_obj = re.match(r"(`(?:[^`]|``)+`|\w+)(?:(?:\.)(`(?:[^`]|``)+`|\w+))?"
+                     "(?:\:)"
+                     "(`(?:[^`]|``)+`|\w+)(?:(?:\.)(`(?:[^`]|``)+`|\w+))?",
+                     argument)
     if not m_obj:
-        parser.error("Invalid format for object compare argument. "
-                      "Format should be: db1.object:db2:object or db1:db2.")
+        parser.error(PARSE_ERR_DB_OBJ_PAIR.format(db_obj_pair=argument,
+                                                  db1_label='db1',
+                                                  obj1_label='object1',
+                                                  db2_label='db2',
+                                                  obj2_label='object2'))
     db1, obj1, db2, obj2 = m_obj.groups()
-    if (obj1 is not None and obj2 is None) or \
-       (obj1 is None and obj2 is not None):
-        parser.error("Incorrect object compare argument. "
-                      "Format should be: db1.object:db2:object or db1:db2.")
-    
+
+    # Verify if the size of the objects matched by the REGEX is equal to the
+    # initial specified string. In general, this identifies the missing use
+    # of backticks.
+    matched_size = len(db1)
+    if obj1:
+        # add 1 for the separator '.'
+        matched_size = matched_size + 1
+        matched_size = matched_size + len(obj1)
+    # add 1 for the separator ':'
+    matched_size = matched_size + 1
+    matched_size = matched_size + len(db2)
+    if obj2:
+        # add 1 for the separator '.'
+        matched_size = matched_size + 1
+        matched_size = matched_size + len(obj2)
+    if matched_size != len(argument):
+        parser.error(PARSE_ERR_DB_OBJ_PAIR_EXT.format(db_obj_pair=argument,
+                                                      db1_label='db1',
+                                                      obj1_label='object1',
+                                                      db2_label='db2',
+                                                      obj2_label='object2',
+                                                      db1_value=db1,
+                                                      obj1_value=obj1,
+                                                      db2_value=db2,
+                                                      obj2_value=obj2))
+
+    if (obj1 and not obj2) or (not obj1 and obj2):
+        if obj1:
+            detail = PARSE_ERR_DB_OBJ_MISSING.format(db_no_obj_label='db2',
+                                                     db_no_obj_value=db2,
+                                                     only_obj_value=obj1,
+                                                     db_obj_label='db1',
+                                                     db_obj_value=db1)
+        else:
+            detail = PARSE_ERR_DB_OBJ_MISSING.format(db_no_obj_label='db1',
+                                                     db_no_obj_value=db1,
+                                                     only_obj_value=obj2,
+                                                     db_obj_label='db2',
+                                                     db_obj_value=db2)
+        parser.error(PARSE_ERR_DB_OBJ_MISSING_MSG.format(detail=detail,
+                                                         db1_label='db1',
+                                                         obj1_label='object1',
+                                                         db2_label='db2',
+                                                         obj2_label='object2'))
+
     # We have db1.obj:db2.obj
-    if obj1 is not None:
+    if obj1:
         try:
             diff = object_diff(server1_values, server2_values,
-                               "`%s`.`%s`" % (db1, obj1),
-                               "`%s`.`%s`" % (db2, obj2), options)
-        except UtilError, e:
-            print "ERROR:", e.errmsg
-            exit(1)
-        except Exception, e:
-            print e
-            exit(1)
+                               "%s.%s" % (db1, obj1),
+                               "%s.%s" % (db2, obj2), options)
+        except UtilError:
+            _, e, _ = sys.exc_info()
+            print("ERROR: %s" % e.errmsg)
+            sys.exit(1)
         if diff is not None:
             diff_failed = True
             
     # We have db1:db2
     else:
         try:
-            res = database_diff(server1_values, server2_values, db1, db2, options)
-        except UtilError, e:
-            if not opt.output_xml:
-                print "ERROR:", e.errmsg
-            else:
-                error = output.xml.new_tag("error")
-                error.insert(1, CData(e.errmsg))
-                output.xml.out.insert(1, error)
-                print output.xml.prettify()
-            exit(1)
-        except Exception, e:
-            print e
-            exit(1)
+            res = database_diff(server1_values, server2_values,
+                                db1, db2, options)
+        except UtilError:
+            _, e, _ = sys.exc_info()
+            print("ERROR: %s" % e.errmsg)
+            sys.exit(1)
         if not res:
             diff_failed = True
 
 if diff_failed:
-    if not opt.quiet and not opt.output_xml:
-        print "Compare failed. One or more differences found."
+    if not opt.quiet:
+        print("Compare failed. One or more differences found.")
+    sys.exit(1)            
 
-    if opt.output_xml:
-        print output.xml.prettify()
-
-    exit(1)            
-
-if not opt.quiet and not opt.output_xml:
-    print "Success. All objects are the same."
-
-if opt.output_xml:
-    print output.xml.prettify()
-
-exit()
+if not opt.quiet:
+    print("Success. All objects are the same.")
+    
+sys.exit()
 

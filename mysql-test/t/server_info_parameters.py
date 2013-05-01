@@ -1,11 +1,26 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import server_info
 
 from mysql.utilities.exception import MUTLibError
 
 _FORMATS = ['GRID','CSV','TAB','VERTICAL']
+
 
 class test(server_info.test):
     """check parameters for serverinfo
@@ -35,14 +50,14 @@ class test(server_info.test):
         res = self.run_test_case(0, cmd_str + cmd_opts, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
-            
+
         test_num += 1
         cmd_opts = " --format=csv --no-headers"
         comment = "Test case %d - no headers" % test_num
         res = self.run_test_case(0, cmd_str + cmd_opts, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
-            
+
         for format in _FORMATS:
             cmd_opts = " --format=%s --no-headers" % format
             test_num += 1
@@ -51,17 +66,8 @@ class test(server_info.test):
             if not res:
                 raise MUTLibError("%s: failed" % comment)
 
-        self.port = int(self.servers.get_next_port())
-        res = self.servers.start_new_server(self.server1, 
-                                            self.port,
-                                            self.servers.get_next_id(),
-                                            "root", "temp_server_info")
-        self.server3 = res[0]
-        if not self.server3:
-            raise MUTLibError("%s: Failed to create a new slave." % comment)
-
-        from_conn3 = "--server=" + self.build_connection_string(self.server3)
-        cmd_str = "mysqlserverinfo.py %s " % from_conn3
+        cmd_str = self.start_stop_newserver(delete_log=False, 
+                                            stop_server=False)
 
         test_num += 1
         # We will also show that -vv does not produce any additional output.
@@ -70,7 +76,7 @@ class test(server_info.test):
         res = self.run_test_case(0, cmd_str + cmd_opts, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
-            
+
         test_num += 1
         cmd_opts = " --format=vertical --show-servers"
         comment = "Test case %d - show servers" % test_num
@@ -83,13 +89,13 @@ class test(server_info.test):
         self.basedir = res[0][1]
         res = self.server3.show_server_variable('datadir')
         self.datadir3 = res[0][1]
-        
+
         self.servers.stop_server(self.server3, 10, False)
-        self.servers.clear_last_port()
-        
+        self.servers.remove_server(self.server3.role)
+        self.remove_logs_from_server(self.datadir3)
         # NOTICE: The -vv option cannot be tested as it produces machine-
         #         specific data from the server start command.
-        
+
         test_num += 1
         cmd_opts = " --format=vertical --start " + \
                    "--basedir=%s --datadir=%s" % (self.basedir, self.datadir3)
@@ -99,7 +105,7 @@ class test(server_info.test):
             raise MUTLibError("%s: failed" % comment)        
 
         server_info.test.do_replacements(self)
-        
+
         self.replace_result("+---", "+---------+\n")
         self.replace_result("|", "| XXXX ...|\n")
         self.replace_result("localhost:", "localhost:XXXX [...]\n")

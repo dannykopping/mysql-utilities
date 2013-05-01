@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,14 +19,17 @@
 """
 This file contains the server information utility.
 """
+from mysql.utilities.common.tools import check_python_version
 
-import optparse
+# Check Python version compatibility
+check_python_version()
+
 import os
-import re
 import sys
-import time
-from mysql.utilities import VERSION_FRM
+
 from mysql.utilities.command.serverinfo import show_server_info
+from mysql.utilities.common.options import add_basedir_option
+from mysql.utilities.common.options import check_basedir_option
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.common.options import add_format_option
 from mysql.utilities.common.options import add_verbosity
@@ -62,8 +65,7 @@ parser.add_option("-s", "--start", action="store_true", dest="start",
                   help="start server in read only mode if offline")
 
 # Add --basedir option
-parser.add_option("--basedir", action="store", dest="basedir", default=None,
-                  type="string", help="the base directory for the server")
+add_basedir_option(parser)
 
 # Add --datadir option
 parser.add_option("--datadir", action="store", dest="datadir", default=None,
@@ -85,12 +87,15 @@ add_verbosity(parser, False)
 # Now we process the rest of the arguments.
 opt, args = parser.parse_args()
 
+# Check the basedir option for errors (e.g., invalid path)
+check_basedir_option(parser, opt.basedir)
+
 # Check port range
 if os.name == 'nt':
     parts = opt.ports.split(":")
     if len(parts) != 2:
-        print "# WARNING : %s is not a valid port range. Using default." % \
-              opt.ports
+        print("# WARNING : %s is not a valid port range. Using default." % 
+              opt.ports)
         opt.ports = "3306:3333"
 
 # Set options for database operations.
@@ -112,13 +117,15 @@ if opt.server is None:
 
 try:
     show_server_info(opt.server, options)
-except UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
-except Exception, e:
-    print "ERROR:", e
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
+except Exception:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e)
+    sys.exit(1)
 
-print "#...done."
+print("#...done.")
 
-exit()
+sys.exit()

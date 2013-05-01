@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,17 +21,22 @@ This file contains the disk usage utility for showing the estimated disk
 storage of the databases and system files.
 """
 
-import optparse
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os
-import re
 import sys
 import time
-from mysql.utilities import VERSION_FRM
+
 from mysql.utilities.command import diskusage
 from mysql.utilities.common.options import parse_connection
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.common.options import add_verbosity
 from mysql.utilities.common.options import add_format_option
+from mysql.utilities.common.server import connect_servers
+from mysql.utilities.exception import FormatError
 from mysql.utilities.exception import UtilError
 
 # Constants
@@ -96,32 +101,36 @@ add_verbosity(parser, True)
 # Now we process the rest of the arguments.
 opt, args = parser.parse_args()
 
-from mysql.utilities.common.server import connect_servers
-
 # Parse source connection values
 try:
-    source_values = parse_connection(opt.server)
-except:
-    parser.error("Source connection values invalid or cannot be parsed.")
+    source_values = parse_connection(opt.server, None, opt)
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Source connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Source connection values invalid: %s." % err.errmsg)
 
 try:
     conn_options = {
         'version'   : "5.1.30",
     }
-    servers = connect_servers(source_values, None, conn_options)
-except UtilError, e:
+    servers = connect_servers(source_values, None)
+except UtilError:
+    _, e, _ = sys.exc_info()
     parser.error(e.errmsg)
 
 try:
     res = servers[0].show_server_variable("datadir")
     datadir = res[0][1]
-except UtilError, e:
+except UtilError:
+    _, e, _ = sys.exc_info()
     parser.error(e.errmsg)
 
 if not os.access(datadir, os.R_OK):
-    print "\nNOTICE: Your user account does not have read access to the " + \
-          "datadir. Data sizes will be calculated and actual file sizes " + \
-          "may be omitted. Some features may be unavailable.\n"
+    print("\nNOTICE: Your user account does not have read access to the "
+          "datadir. Data sizes will be calculated and actual file sizes "
+          "may be omitted. Some features may be unavailable.\n")
 
 # Set options for database operations.
 options = {
@@ -138,45 +147,50 @@ options = {
 # We do database disk usage by default.
 try:
     diskusage.show_database_usage(servers[0], datadir, args, options)
-except UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
 
 # Look for the general and query logs and report
 if opt.do_logs or opt.do_all:
     try:
         diskusage.show_logfile_usage(servers[0], options)
-    except UtilError, e:
-        print "ERROR:", e.errmsg
-        exit(1)
+    except UtilError:
+        _, e, _ = sys.exc_info()
+        print("ERROR: %s" % e.errmsg)
+        sys.exit(1)
 
 # Look for the binary logs and report
 if opt.do_binlog or opt.do_all:
     try:
         options["log_type"] = 'binary log'
         diskusage.show_log_usage(servers[0], datadir, options)
-    except UtilError, e:
-        print "ERROR:", e.errmsg
-        exit(1)
+    except UtilError:
+        _, e, _ = sys.exc_info()
+        print("ERROR: %s" % e.errmsg)
+        sys.exit(1)
 
 # Look for the relay logs and report
 if opt.do_relaylog or opt.do_all:
     try:
         options["log_type"] = 'relay log'
         diskusage.show_log_usage(servers[0], datadir, options)
-    except UtilError, e:
-        print "ERROR:", e.errmsg
-        exit(1)
+    except UtilError:
+        _, e, _ = sys.exc_info()
+        print("ERROR: %s" % e.errmsg)
+        sys.exit(1)
 
 # Look at the inoodb tablespace information are report
 if opt.do_innodb or opt.do_all:
     try:
         diskusage.show_innodb_usage(servers[0], datadir, options)
-    except UtilError, e:
-        print "ERROR:", e.errmsg
-        exit(1)
+    except UtilError:
+        _, e, _ = sys.exc_info()
+        print("ERROR: %s" % e.errmsg)
+        sys.exit(1)
 
 if not opt.quiet:
-    print "#...done."
+    print("#...done.")
 
-exit()
+sys.exit()

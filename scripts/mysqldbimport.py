@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,18 +21,22 @@ This file contains the import database utility which allows users to import
 metadata for objects in a database and data for tables.
 """
 
-import optparse
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os
-import re
 import sys
 import time
-from mysql.utilities import VERSION_FRM
+
 from mysql.utilities.command import dbimport
 from mysql.utilities.common.options import parse_connection
 from mysql.utilities.common.options import setup_common_options, add_engines
 from mysql.utilities.common.options import add_skip_options, check_skip_options
 from mysql.utilities.common.options import add_verbosity, check_verbosity
 from mysql.utilities.common.options import add_format_option
+from mysql.utilities.exception import FormatError
 from mysql.utilities.exception import UtilError
 
 # Constants
@@ -100,6 +104,11 @@ parser.add_option("--skip-blobs", action="store_true", dest="skip_blobs",
 parser.add_option("--skip-rpl", action="store_true", dest="skip_rpl",
                   default=False, help="do not execute replication commands.")
 
+# Add skip generation of GTID statements
+parser.add_option("--skip-gtid", action="store_true", default=False,
+                  dest="skip_gtid", help="do not execute the GTID_PURGED "
+                  "statements.")
+
 # Add the skip common options
 add_skip_options(parser)
 
@@ -117,24 +126,25 @@ check_verbosity(opt)
 
 try:
     skips = check_skip_options(opt.skip_objects)
-except UtilError, e:
-    print "ERROR: %s" % e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
 
 # Fail if no arguments
 if len(args) == 0:
     parser.error("You must specify at least one file to import.")
 
 if opt.skip_blobs and not opt.import_type == "data":
-    print "# WARNING: --skip-blobs option ignored for metadata import."
+    print("# WARNING: --skip-blobs option ignored for metadata import.")
 
 if "data" in skips and opt.import_type == "data":
-    print "ERROR: You cannot use --import=data and --skip-data when " \
-          "importing table data."
-    exit(1)
+    print("ERROR: You cannot use --import=data and --skip-data when "
+          "importing table data.")
+    sys.exit(1)
 
 if "create_db" in skips and opt.do_drop:
-    print "ERROR: You cannot combine --drop-first and --skip=create_db."
+    print("ERROR: You cannot combine --drop-first and --skip=create_db.")
     exit (1)
 
 # Set options for database operations.
@@ -161,13 +171,18 @@ options = {
     "new_engine"    : opt.new_engine,
     "def_engine"    : opt.def_engine,
     "skip_rpl"      : opt.skip_rpl,
+    "skip_gtid"     : opt.skip_gtid,
 }
 
 # Parse server connection values
 try:
-    server_values = parse_connection(opt.server)
-except:
-    parser.error("Server connection values invalid or cannot be parsed.")
+    server_values = parse_connection(opt.server, None, options)
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Server connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Server connection values invalid: %s." % err.errmsg)
 
 # Build list of files to import
 file_list = []
@@ -185,8 +200,9 @@ try:
     if opt.verbosity >= 3:
         print_elapsed_time(start_test)
 
-except UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
 
-exit()
+sys.exit()

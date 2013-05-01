@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,9 +21,16 @@ This file contains the clone server utility which launches a new instance
 of an existing server.
 """
 
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os.path
 import sys
 
+from mysql.utilities.common.options import add_basedir_option
+from mysql.utilities.common.options import check_basedir_option
 from mysql.utilities.common.options import parse_connection
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.common.options import add_verbosity
@@ -74,11 +81,18 @@ parser.add_option("--write-command", "-w", action="store", dest='cmd_file',
 add_verbosity(parser, True)
 
 # Add --basedir option
-parser.add_option("--basedir", action="store", dest="basedir", default=None,
-                  type="string", help="the base directory for the server")
+add_basedir_option(parser)
+
+# Add --delete-data
+parser.add_option("--delete-data", action="store_true", dest="delete",
+                  help="delete the folder specified by --new-data if it "
+                  "exists and is not empty.")
 
 # Now we process the rest of the arguments.
 opt, args = parser.parse_args()
+
+# Check the basedir option for errors (e.g., invalid path)
+check_basedir_option(parser, opt.basedir)
 
 # Can only use --basedir and --datadir if --server is missing
 if opt.basedir is not None and opt.server is not None:
@@ -90,7 +104,18 @@ if opt.new_data is None:
 
 # Warn if root-password is left off.
 if opt.root_pass is None or opt.root_pass == '':
-    print "# WARNING: Root password for new instance has not been set."
+    print("# WARNING: Root password for new instance has not been set.")
+
+# Fail if user does not have access to new data dir.
+if os.path.exists(opt.new_data):
+    if not os.access(opt.new_data, os.R_OK|os.W_OK):
+        parser.error("You do not have enough privileges to access the folder "
+                     "specified by --new-data.")
+    
+    # Fail if new data is not empty and delete not specified
+    if os.listdir(opt.new_data) and not opt.delete:
+        parser.error("Target data directory exists and is not empty. Use "
+                     "--delete-data option to delete folder before cloning.")
 
 # Build options
 options = {
@@ -103,6 +128,7 @@ options = {
     'quiet'          : opt.quiet,
     'cmd_file'       : opt.cmd_file,
     'basedir'        : opt.basedir,
+    'delete'         : opt.delete,
 }
 
 # Expand user paths and resolve relative paths
@@ -119,15 +145,20 @@ if opt.basedir and opt.basedir[0] == '.':
 if opt.basedir is None:
     try:
         conn = parse_connection(opt.server)
-    except:
-        parser.error("Source connection values invalid or cannot be parsed.")
+    except exception.FormatError:
+        _, err, _ = sys.exc_info()
+        parser.error("Server connection values invalid: %s." % err)
+    except exception.UtilError:
+        _, err, _ = sys.exc_info()
+        parser.error("Server connection values invalid: %s." % err.errmsg)
 else:
     conn = None
 
 try:
     res = serverclone.clone_server(conn, options)
-except exception.UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except exception.UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
     
-exit()
+sys.exit()

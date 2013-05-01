@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2010, 2012 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,8 +22,10 @@ This module contains abstractions of a MySQL table and an index.
 import multiprocessing
 import re
 import sys
-import mysql.connector
 from mysql.utilities.exception import UtilError
+from mysql.utilities.common.sql_transform import quote_with_backticks
+from mysql.utilities.common.sql_transform import remove_backtick_quoting
+from mysql.utilities.common.sql_transform import is_quoted_with_backticks
 
 # Constants
 _MAXPACKET_SIZE = 1024 * 1024
@@ -48,7 +50,9 @@ def _parse_object_name(qualified_name):
     Returns tuple containing name split
     """
 
-    parts = re.match("(\w+)(?:\.(\w+))?", qualified_name)
+    # Split the qualified name considering backtick quotes
+    parts = re.match(r"(`(?:[^`]|``)+`|\w+)(?:(?:\.)(`(?:[^`]|``)+`|\w+))?",
+                     qualified_name)
     if parts:
         return parts.groups()
     else:
@@ -203,7 +207,7 @@ class Index(object):
 
         if self.name == "PRIMARY":
            return None
-        query_str = "ALTER TABLE `%s`.`%s` DROP INDEX %s" % \
+        query_str = "ALTER TABLE %s.%s DROP INDEX %s" % \
                     (self.db, self.table, self.name)
         return query_str
 
@@ -236,7 +240,7 @@ class Index(object):
         """
 
         if self.name == "PRIMARY":
-            print "ALTER TABLE `%s`.`%s` ADD PRIMARY KEY (%s)" % \
+            print "ALTER TABLE %s.%s ADD PRIMARY KEY (%s)" % \
                   (self.db, self.table, self.__get_column_list())
         else:
             create_str = "CREATE "
@@ -244,7 +248,7 @@ class Index(object):
                 create_str += "UNIQUE "
             if self.type == "FULLTEXT":
                 create_str += "FULLTEXT "
-            create_str += "INDEX %s ON `%s`.`%s` (%s) " % \
+            create_str += "INDEX %s ON %s.%s (%s) " % \
                   (self.name, self.db, self.table, self.__get_column_list())
             if (self.type == "BTREE") or (self.type == "RTREE"):
                 create_str += "USING %s" % (self.type)
@@ -287,8 +291,20 @@ class Table(object):
         self.verbose = options.get('verbose', False)
         self.quiet = options.get('quiet', False)
         self.server = server1
-        self.table = name
-        self.db_name, self.tbl_name = _parse_object_name(name)
+
+        # Keep table identifier considering backtick quotes
+        if is_quoted_with_backticks(name):
+            self.q_table = name
+            self.q_db_name, self.q_tbl_name = _parse_object_name(name)
+            self.db_name = remove_backtick_quoting(self.q_db_name)
+            self.tbl_name = remove_backtick_quoting(self.q_tbl_name)
+            self.table = ".".join([self.db_name, self.tbl_name])
+        else:
+            self.table = name
+            self.db_name, self.tbl_name = _parse_object_name(name)
+            self.q_db_name = quote_with_backticks(self.db_name)
+            self.q_tbl_name = quote_with_backticks(self.tbl_name)
+            self.q_table = ".".join([self.q_db_name, self.q_tbl_name])
         self.obj_type = "TABLE"
         self.pri_idx = None
 
@@ -302,6 +318,7 @@ class Table(object):
         self.blob_columns = []
         self.column_format = None
         self.column_names = []
+        self.q_column_names = []
         if options.get('get_cols', False):
             self.get_column_metadata()
         self.dest_vals = None
@@ -316,7 +333,7 @@ class Table(object):
         if self.max_packet_size > _MAXPACKET_SIZE:
             self.max_packet_size = _MAXPACKET_SIZE
 
-        self._insert = "INSERT INTO `%s`.`%s` VALUES "
+        self._insert = "INSERT INTO %s.%s VALUES "
         self.query_options = {  # Used for skipping fetch of rows
             'fetch' : False
         }
@@ -361,13 +378,20 @@ class Table(object):
         """
 
         if columns is None:
-            columns = self.server.exec_query("explain %s" % self.table)
+            columns = self.server.exec_query("explain %s" % self.q_table)
         stop = len(columns)
         self.column_names = []
         col_format_values = [''] * stop
         if columns is not None:
-            for col in range(0,stop):
-                self.column_names.append(columns[col][0])
+            for col in range(0, stop):
+                if is_quoted_with_backticks(columns[col][0]):
+                    self.column_names.append(
+                                remove_backtick_quoting(columns[col][0]))
+                    self.q_column_names.append(columns[col][0])
+                else:
+                    self.column_names.append(columns[col][0])
+                    self.q_column_names.append(
+                                quote_with_backticks(columns[col][0]))
                 col_type_prefix = columns[col][1][0:4].lower()
                 if col_type_prefix in ("char", "enum", "set("):
                     self.text_columns.append(col)
@@ -383,18 +407,23 @@ class Table(object):
                              (" (", ', '.join(col_format_values), ")")
 
 
-    def get_col_names(self):
+    def get_col_names(self, quote_backticks=False):
         """Get column names for the export operation.
+
+        quote_backticks[in]    If True the column names will be quoted with
+                               backticks. Default is False.
 
         Return (list) column names
         """
 
         if self.column_format is None:
             self.column_names = []
-            rows = self.server.exec_query("explain %s" % self.table)
+            rows = self.server.exec_query("explain %s" % self.q_table)
             for row in rows:
                 self.column_names.append(row[0])
-        return self.column_names
+                self.q_column_names.append(quote_with_backticks(row[0]))
+
+        return self.q_column_names if quote_backticks else self.column_names
 
 
     def _build_update_blob(self, row, new_db, name, blob_col):
@@ -414,23 +443,23 @@ class Table(object):
         if self.column_format is None:
             self.get_column_metadata()
 
-        blob_insert = "UPDATE `%s`.`%s` SET " % (new_db, name)
+        blob_insert = "UPDATE %s.%s SET " % (new_db, name)
         where_values = []
         do_commas = False
         has_data = False
         stop = len(row)
         for col in range(0,stop):
-            col_name = self.column_names[col]
+            col_name = quote_with_backticks(self.column_names[col])
             if col in self.blob_columns:
                 if row[col] is not None and len(row[col]) > 0:
                     if do_commas:
                         blob_insert += ", "
-                    blob_insert += "`%s` = " % col_name + "%s" % \
+                    blob_insert += "%s = " % col_name + "%s" % \
                                    MySQLConverter().quote(row[col])
                     has_data = True
                     do_commas = True
             else:
-                where_values.append("`%s` = '%s' " % (col_name, row[col]))
+                where_values.append("%s = '%s' " % (col_name, row[col]))
         if has_data:
             return blob_insert + " WHERE " + " AND ".join(where_values) + ";"
         return None
@@ -454,23 +483,26 @@ class Table(object):
         # Find blobs
         for col in self.blob_columns:
             # Save blob updates for later...
-            blob = self._build_update_blob(row, new_db, self.tbl_name, col)
+            blob = self._build_update_blob(row, new_db, self.q_tbl_name, col)
             if blob is not None:
                 blob_inserts.append(blob)
             values[col] = "NULL"
 
-        # Replace single quotes located in the value for a text field with
-        # a double single quote. This fixes SQL errors related to using
-        # single quotes in a string value that is single quoted. For example,
-        # we change 'this' is it' to 'this'' is it'
-        [values[col].replace("'", "''") for col in self.text_columns]
-        
+        # Replace single quotes located in the value for a text field with the
+        # correct special character escape sequence. This fixes SQL errors
+        # related to using single quotes in a string value that is single
+        # quoted. For example, 'this' is it' is changed to 'this\' is it'
+        for col in self.text_columns:
+            #Check if the value is not None before replacing quotes
+            if values[col]:
+                values[col] = values[col].replace("'", "\\'")
+
         # Build string
         val_str = self.column_format % tuple(values)
 
         # Change 'None' occurrences with "NULL"
-        val_str.replace(", None", ", NULL")
-        val_str.replace("(None", "(NULL")
+        val_str = val_str.replace(", None", ", NULL")
+        val_str = val_str.replace("(None", "(NULL")
         
         return (val_str, blob_inserts)
 
@@ -499,7 +531,7 @@ class Table(object):
         val_str = None
         for row in rows:
             if row_count == 0:
-                insert_str = self._insert % (new_db, self.tbl_name)
+                insert_str = self._insert % (new_db, self.q_tbl_name)
                 if val_str:
                     row_count += 1
                     insert_str += val_str
@@ -544,7 +576,7 @@ class Table(object):
         # Get number of rows
         num_rows = 0
         try:
-            res = self.server.exec_query("USE %s" % self.db_name,
+            res = self.server.exec_query("USE %s" % self.q_db_name,
                                          self.query_options)
         except Exception, e:
             pass
@@ -603,7 +635,7 @@ class Table(object):
         dest.connect()
 
         # Issue the write lock
-        lock_list = [("`%s`.`%s`" % (new_db, self.tbl_name), 'WRITE')]
+        lock_list = [("%s.%s" % (new_db, self.q_tbl_name), 'WRITE')]
         my_lock = Lock(dest, lock_list, {'locking':'lock-all',})
                     
         # First, turn off foreign keys if turned on
@@ -685,9 +717,9 @@ class Table(object):
 
         new_db[in]         New database name for the table
         """
-        query_str = "INSERT INTO `%s`.`%s` SELECT * FROM `%s`.`%s`" % \
-                    (new_db, self.tbl_name, self.db_name, self.tbl_name)
-        if self.verbose and not self.vquiet:
+        query_str = "INSERT INTO %s.%s SELECT * FROM %s.%s" % \
+                    (new_db, self.q_tbl_name, self.q_db_name, self.q_tbl_name)
+        if self.verbose and not self.quiet:
             print query_str
         self.server.exec_query(query_str)
 
@@ -707,8 +739,12 @@ class Table(object):
         """
 
         if new_db is None:
-            new_db = self.db_name
-            
+            new_db = self.q_db_name
+        else:
+            # If need quote new_db identifier with backticks
+            if not is_quoted_with_backticks(new_db):
+                new_db = quote_with_backticks(new_db)
+
         num_conn = int(connections)
 
         if cloning:
@@ -749,7 +785,7 @@ class Table(object):
         segment_size = self.get_segment_size(num_conn)
 
         # Execute query to get all of the data
-        cur = self.server.exec_query("SELECT * FROM %s" % self.table,
+        cur = self.server.exec_query("SELECT * FROM %s" % self.q_table,
                                      self.query_options)
 
         while True:
@@ -810,7 +846,7 @@ class Table(object):
 
         Returns result set
         """
-        res = self.server.exec_query("SHOW INDEXES FROM %s" % self.table)
+        res = self.server.exec_query("SHOW INDEXES FROM %s" % self.q_table)
         return res
     
     
@@ -899,7 +935,7 @@ class Table(object):
         """
         pri_idx = []
         
-        rows = self.server.exec_query("EXPLAIN " + self.table)
+        rows = self.server.exec_query("EXPLAIN " + self.q_table)
 
         # Return False if no indexes found.
         if not rows:
@@ -1063,7 +1099,7 @@ class Table(object):
                                          query_options)
         if rows:
             print "#"
-            print "# Showing the top 5 %s performing indexes from %s:\n#" % \
+            print "# Showing the top %s performing indexes from %s:\n#" % \
                   (type, self.table)
             cols = ("database", "table", "name", "column", "sequence",
                     "num columns", "cardinality", "est. rows", "percent")

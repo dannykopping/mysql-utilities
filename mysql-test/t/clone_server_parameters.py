@@ -1,10 +1,24 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 
 from mysql.utilities.common.server import Server
-from mysql.utilities.exception import MUTLibError
+from mysql.utilities.exception import UtilError, MUTLibError
 
 class test(mutlib.System_test):
     """clone server parameters
@@ -19,17 +33,17 @@ class test(mutlib.System_test):
         self.new_server = None
         return True
 
-    def _test_server_clone(self, cmd_str, comment, kill=True):
+    def _test_server_clone(self, cmd_str, comment, kill=True, capture_all=False):
         self.results.append(comment+"\n")
         port1 = int(self.servers.get_next_port())
         cmd_str += " --new-port=%d " % port1
         full_datadir = os.path.join(os.getcwd(), "temp_%s" % port1)
-        cmd_str += " --new-data=%s " % full_datadir
+        cmd_str += " --new-data=%s --delete " % full_datadir
         res = self.exec_util(cmd_str, "start.txt")
         for line in open("start.txt").readlines():
             # Don't save lines that have [Warning] or don't start with #
             index = line.find("[Warning]")
-            if index <= 0 and line[0] == '#':
+            if capture_all or (index <= 0 and line[0] == '#'):
                 self.results.append(line)
         if res:
             raise MUTLibError("%s: failed" % comment)
@@ -57,10 +71,9 @@ class test(mutlib.System_test):
             # Connect to the new instance
             try:
                 self.new_server.connect()
-            except MUTLibError, e:
+            except UtilError, e:
                 self.new_server = None
                 raise MUTLibError("Cannot connect to spawned server.")
-                return False
             self.servers.stop_server(self.new_server)
 
         self.servers.clear_last_port()
@@ -74,21 +87,22 @@ class test(mutlib.System_test):
        
         test_cases = [
             # (comment, command options, kill running server)
-            ("show help", " --help ", False),
-            ("write command to file", " --write-command=startme.sh ", True),
-            ("write command to file shortcut", " -w startme.sh ", True),
-            ("verbosity = -v", " -v ", True),
-            ("verbosity = -vv", " -vv ", True),
-            ("verbosity = -vvv", " -vvv ", True),
+            ("show help", " --help ", False, True),
+            ("write command to file", " --write-command=startme.sh ",
+             True, False),
+            ("write command to file shortcut", " -w startme.sh ", True, False),
+            ("verbosity = -v", " -v ", True, False),
+            ("verbosity = -vv", " -vv ", True, False),
+            ("verbosity = -vvv", " -vvv ", True, False),
             ("-vvv and write command to file shortcut",
-             " -vvv -w startme.sh ", True),
+             " -vvv -w startme.sh ", True, False),
         ]
         
         test_num = 1
         for row in test_cases:
             new_comment = "Test case %d : %s" % (test_num, row[0])
             if not self._test_server_clone(base_cmd + row[1],
-                                           new_comment, row[2]):
+                                           new_comment, row[2], row[3]):
                 raise MUTLibError("%s: failed" % new_comment)
             test_num += 1
 

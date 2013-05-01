@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 from mysql.utilities.exception import MUTLibError, UtilDBError
@@ -13,7 +27,8 @@ class test(mutlib.System_test):
     """
 
     def check_prerequisites(self):
-        self.check_gtid_unsafe()
+        if self.servers.get_server(0).check_version_compat(5, 6, 5):
+            raise MUTLibError("Test requires server version prior to 5.6.5")
         return self.check_num_servers(1)
 
     def setup(self):
@@ -43,8 +58,8 @@ class test(mutlib.System_test):
             if self.debug:
                 print comment
             self.drop_db(self.server1, "util_db_clone")
-            cmd = "mysqldbcopy.py %s %s " % (from_conn, to_conn) + \
-                  " util_test:util_db_clone --force --locking=%s" % locktype
+            cmd = "mysqldbcopy.py --skip-gtid %s %s util_test:util_db_clone " \
+                  " --force --locking=%s" % (from_conn, to_conn, locktype)
             try:
                 res = self.exec_util(cmd, self.res_fname)
                 self.results.append(res)

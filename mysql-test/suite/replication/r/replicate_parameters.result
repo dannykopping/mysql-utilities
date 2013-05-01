@@ -7,7 +7,7 @@ Test case 1 - use the test feature
 # Success! Replication is running.
 # ...done.
 Test case 2 - show the help
-Usage: mysqlreplicate.py --master=root@localhost:3306 --slave=root@localhost:3310 --server-id=3 --rpl_user=rpl:passwd 
+Usage: mysqlreplicate.py --master=root@localhost:3306 --slave=root@localhost:3310 --rpl-user=rpl:passwd 
 
 mysqlreplicate - establish replication with a master
 
@@ -15,11 +15,14 @@ Options:
   --version             show program's version number and exit
   --help                display a help message and exit
   --master=MASTER       connection information for master server in the form:
-                        <user>:<password>@<host>:<port>:<socket>
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>].
   --slave=SLAVE         connection information for slave server in the form:
-                        <user>:<password>@<host>:<port>:<socket>
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>].
   --rpl-user=RPL_USER   the user and password for the replication user
-                        requirement - e.g. rpl:passwd - default = rpl:rpl
+                        requirement, in the form: <user>[:<password>] or
+                        <login-path>. E.g. rpl:passwd - By default = rpl:rpl
   -p, --pedantic        fail if storage engines differ among master and slave.
   --test-db=TEST_DB     database name to use in testing  replication setup
                         (optional)
@@ -40,12 +43,19 @@ Test case 3 - use the verbose feature
 # slave on localhost: ... connected.
 # master id = XXX
 #  slave id = XXX
+# master uuid = XXXXX
+#  slave uuid = XXXXX
 # Checking InnoDB statistics for type and version conflicts.
 # Checking storage engines...
 # Checking for binary logging on master...
 # Setting up replication...
 # Connecting slave to master...
 # Starting slave from master's last position...
+# IO status: Waiting for master to send event
+# IO thread running: Yes
+# IO error: None
+# SQL thread running: Yes
+# SQL error: None
 # ...done.
 Test case 4 - use the start-from-beginning feature
 # master on localhost: ... connected.

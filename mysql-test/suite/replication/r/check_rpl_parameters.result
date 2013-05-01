@@ -7,9 +7,11 @@ Options:
   --version             show program's version number and exit
   --help                display a help message and exit
   --master=MASTER       connection information for master server in the form:
-                        <user>:<password>@<host>:<port>:<socket>
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>].
   --slave=SLAVE         connection information for slave server in the form:
-                        <user>:<password>@<host>:<port>:<socket>
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>]
   --master-info-file=MASTER_INFO
                         the name of the master information file on the
                         slave.default = 'master.info' read from the data
@@ -36,10 +38,15 @@ Checking server_id values                                            [pass]
  master id = XXXXX
   slave id = XXXXX
 
+Checking server_uuid values                                          [pass]
+
+ master uuid = XXXXX
+  slave uuid = XXXXX
+
 Is slave connected to master?                                        [pass]
 Check master information file                                        [FAIL]
 
-Cannot read master information file: m.info.
+Cannot find master information file: m.info.
 
 Checking InnoDB compatibility                                        [pass]
 Checking storage engines compatibility                               [pass]
@@ -59,6 +66,7 @@ Checking for binary logging on master                      [pass]
 Are there binlog exceptions?                               [pass]
 Replication user exists?                                   [pass]
 Checking server_id values                                  [pass]
+Checking server_uuid values                                [pass]
 Is slave connected to master?                              [pass]
 Check master information file                              [pass]
 Checking InnoDB compatibility                              [pass]
@@ -68,7 +76,7 @@ Checking slave delay (seconds behind master)               [pass]
 # ...done.
 Test case 4 - quiet
 Test case 5 - test failure with quiet
-Test: Check master information file failed. Error: Cannot read master information file: m.info.
+Test: Check master information file failed. Error: Cannot find master information file: m.info.
 Test case 6 - test warning without quiet
 # master on localhost: ... connected.
 # slave on localhost: ... connected.
@@ -85,6 +93,7 @@ Are there binlog exceptions?                                         [WARN]
 
 Replication user exists?                                             [pass]
 Checking server_id values                                            [pass]
+Checking server_uuid values                                          [pass]
 Is slave connected to master?                                        [pass]
 Check master information file                                        [pass]
 Checking InnoDB compatibility                                        [pass]
@@ -115,6 +124,7 @@ Are there binlog exceptions?                                         [WARN]
 
 Replication user exists?                                             [pass]
 Checking server_id values                                            [pass]
+Checking server_uuid values                                          [pass]
 Is slave connected to master?                                        [pass]
 Check master information file                                        [pass]
 Checking InnoDB compatibility                                        [pass]

@@ -1,8 +1,23 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import replicate
 import mutlib
+import socket
 from mysql.utilities.exception import MUTLibError
 
 class test(replicate.test):
@@ -61,14 +76,17 @@ class test(replicate.test):
         same_str = "--master=%s --slave=%s " % (str, str)
 
         comment = "Test case 5a - error: slave and master same machine"
-        res = mutlib.System_test.run_test_case(self, 1, cmd_str +
+        res = mutlib.System_test.run_test_case(self, 2, cmd_str +
                         same_str + "--rpl-user=rpl:whatsit", comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        same_str = "--master=root@this:3306 --slave=root@that:3306"
-        comment = "Test case 5b - error: slave and master same port"
-        res = mutlib.System_test.run_test_case(self, 1, cmd_str +
+        str = self.build_connection_string(self.server1)
+        same_str = "--master=%s --slave=root:root@%s:%s " % \
+                   (str, socket.gethostname().split('.', 1)[0],
+                    self.server1.port)
+        comment = "Test case 5b - error: slave and master same alias/host"
+        res = mutlib.System_test.run_test_case(self, 2, cmd_str +
                         same_str + "--rpl-user=rpl:whatsit", comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
@@ -77,8 +95,7 @@ class test(replicate.test):
         # off for the next test case.
 
         self.port3 = int(self.servers.get_next_port())
-
-        res = self.servers.start_new_server(self.server1, 
+        res = self.servers.start_new_server(self.server0, 
                                             self.port3,
                                             self.servers.get_next_id(),
                                             "root", "temprep1")
@@ -176,6 +193,7 @@ class test(replicate.test):
 
         # Mask known platform-dependent lines
         self.mask_result("Error 2005:", "(1", '#######')
+        self.replace_substring(" (42000)", "")
         self.replace_result("ERROR: Query failed. 1227: Access denied;",
                             "ERROR: Query failed. 1227: Access denied;\n")
 
@@ -186,6 +204,17 @@ class test(replicate.test):
         self.replace_result("Error 2003: Can't connect to",
                             "Error ####: Can't connect to local MySQL server "
                             "####...\n")
+        self.replace_result("ERROR: Query failed. 1227",
+                            "ERROR: Query failed. 1227: Access denied;\n")
+
+        self.replace_result("mysqlreplicate.py: error: Master connection "
+                            "values invalid",
+                            "mysqlreplicate.py: error: Master connection "
+                            "values invalid\n")
+        self.replace_result("mysqlreplicate.py: error: Slave connection "
+                            "values invalid",
+                            "mysqlreplicate.py: error: Slave connection "
+                            "values invalid\n")
 
         return True
 
@@ -198,7 +227,7 @@ class test(replicate.test):
     def cleanup(self):
         if self.server3:
             res = self.servers.stop_server(self.server3)
-            self.servers.clear_last_port()
+            self.servers.remove_server(self.server3.role)
             self.server3 = None
         return replicate.test.cleanup(self)
 

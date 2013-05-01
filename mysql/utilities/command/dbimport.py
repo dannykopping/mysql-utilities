@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,10 +21,13 @@ table data.
 """
 
 import csv
-import re
-import sys
 from itertools import imap
+
+from mysql.utilities.common.sql_transform import quote_with_backticks
+from mysql.utilities.common.sql_transform import is_quoted_with_backticks
+
 from mysql.utilities.exception import UtilError
+
 
 # List of database objects for enumeration
 _DATA_DECORATE = "DATA FOR TABLE"
@@ -38,6 +40,14 @@ _BASIC_COMMANDS = ["CREATE", "USE", "GRANT", "DROP"]
 _DATA_COMMANDS = ["INSERT", "UPDATE"]
 _RPL_COMMANDS = ["START", "STOP", "CHANGE"]
 _RPL_PREFIX = "-- "
+_RPL = len(_RPL_PREFIX)
+_GTID_COMMANDS = ["SET @MYSQLUTILS_TEMP_L", "SET @@SESSION.SQL_LOG_",
+                          "SET @@GLOBAL.GTID_PURG"]
+_GTID_PREFIX = 22
+_GTID_SKIP_WARNING = "# WARNING: GTID commands are present in the import " + \
+    "file but the server does not support GTIDs. Commands are ignored."
+_GTID_MISSING_WARNING = "# WARNING: GTIDs are enabled on this server but " + \
+    "the import file did not contain any GTID commands."
 
 def _read_row(file, format, skip_comments=False):
     """Read a row of from the file.
@@ -52,10 +62,14 @@ def _read_row(file, format, skip_comments=False):
     Returns (tuple) - one row of data
     """
 
+    warnings_found = []
     if format == "sql":
         # Easiest - just read a row and return it.
         for row in file.readlines():
-            if row[0] != '#' and row[0:2] != "--":
+            if row.startswith("# WARNING"):
+                warnings_found.append(row)
+                continue
+            if not (row.startswith('#') or row.startswith('--')):
                 yield row.strip('\n')
     elif format == "vertical":
         # This format is a bit trickier. We need to read a set of rows that
@@ -73,12 +87,23 @@ def _read_row(file, format, skip_comments=False):
         header = []
         data_row = []
         for row in file.readlines():
+            # Show warnings from file
+            if row.startswith("# WARNING"):
+                warnings_found.append(row)
+                continue
             # Process replication commands
-            if row[0:len(_RPL_PREFIX)] == _RPL_PREFIX:
+            if row[0:_RPL] == _RPL_PREFIX:
                 # find first word
-                first_word = row[len(_RPL_PREFIX):row.find(' ')].upper()
+                first_word = row[_RPL:row.find(' ', _RPL)].upper()
                 if first_word in _RPL_COMMANDS:
-                    yield row
+                    yield [row.strip('\n')]
+                    continue
+                # Check for GTID commands
+                elif len(row) > _GTID_PREFIX + _RPL and \
+                   row[_RPL:_GTID_PREFIX + _RPL] \
+                      in _GTID_COMMANDS:
+                    yield [row.strip('\n')]
+                    continue
             # Skip comment rows
             if row[0] == '#':
                 if len(header) > 0:
@@ -139,15 +164,23 @@ def _read_row(file, format, skip_comments=False):
             separator = "|"
         csv_reader = csv.reader(file, delimiter=separator)
         for row in csv_reader:
+            if row[0].startswith("# WARNING"):
+                warnings_found.append(row[0])
+                continue
             # find first word
-            if row[0][0:len(_RPL_PREFIX)] == _RPL_PREFIX:
-                rpl = len(_RPL_PREFIX)
-                first_word = row[0][rpl:rpl+row[0][rpl:].find(' ')].upper()
+            if row[0][0:_RPL] == _RPL_PREFIX:
+                first_word = row[0][_RPL:_RPL+row[0][_RPL:].find(' ')].upper()
             else:
                 first_word = ""
-            if row[0][0:len(_RPL_PREFIX)] == _RPL_PREFIX and \
-                first_word in _RPL_COMMANDS:
-                yield row
+            # Process replication commands
+            if row[0][0:_RPL] == _RPL_PREFIX:
+                if first_word in _RPL_COMMANDS:
+                    yield row
+                # Check for GTID commands
+                elif len(row[0]) > _GTID_PREFIX + _RPL and \
+                   row[0][_RPL:_GTID_PREFIX + _RPL] in _GTID_COMMANDS:
+                    yield row
+                    
             elif format == "grid":
                 if len(row[0]) > 0:
                     if row[0][0] == '+':
@@ -165,6 +198,11 @@ def _read_row(file, format, skip_comments=False):
                     row[0][0:2] != "--") or ((row[0][0] == '#' or \
                     row[0][0:2] == "--") and not skip_comments):
                     yield row
+    if warnings_found:
+        print "CAUTION: The following %s warning " % len(warnings_found) + \
+              "messages were included in the import file:"
+        for row in warnings_found:
+            print row.strip('\n')
 
 
 def _check_for_object_list(row, obj_type):
@@ -239,11 +277,17 @@ def read_next(file, format, no_headers=False):
                     yield (cmd_type, sql_cmd)
                 cmd_type = "RPL_COMMAND"
                 sql_cmd = row
+            elif len(row) > _GTID_PREFIX and \
+                  row[0:_GTID_PREFIX] in _GTID_COMMANDS:
+                #yield goes here
+                yield (cmd_type, sql_cmd)
+                cmd_type = "GTID_COMMAND"
+                sql_cmd = row
             elif first_word in _DATA_COMMANDS:
+                cmd_type = "DATA"
                 if len(sql_cmd) > 0:
                     #yield goes here
                     yield (cmd_type, sql_cmd)
-                cmd_type = "DATA"
                 sql_cmd = row
             else:
                 sql_cmd += row
@@ -253,15 +297,23 @@ def read_next(file, format, no_headers=False):
         found_obj = ""
         for row in _read_row(file, format, False):
             # find first word
-            if row[0][0:len(_RPL_PREFIX)] == _RPL_PREFIX:
-                rpl = len(_RPL_PREFIX)
-                first_word = row[0][rpl:rpl+row[0][rpl:].find(' ')].upper()
+            if row[0][0:_RPL] == _RPL_PREFIX:
+                first_word = row[0][_RPL:_RPL+row[0][_RPL:].find(' ',
+                                                                 _RPL)].upper()
             else:
                 first_word = ""
-            if row[0][0:len(_RPL_PREFIX)] == _RPL_PREFIX and \
+            if row[0][0:_RPL] == _RPL_PREFIX and \
                 first_word in _RPL_COMMANDS:
-                new_row = ", ".join(row)
-                yield("RPL_COMMAND", new_row[len(_RPL_PREFIX):])
+                # join the parts if CSV or TAB
+                if format in ['csv', 'tab']:
+                    yield("RPL_COMMAND", ", ".join(row).strip("--"))
+                else:
+                    yield("RPL_COMMAND", row[0][_RPL:])
+                continue
+            if row[0][0:_RPL] == _RPL_PREFIX and \
+               len(row[0]) > _GTID_PREFIX + _RPL and \
+               row[0][_RPL:_GTID_PREFIX + _RPL] in _GTID_COMMANDS:
+                yield("GTID_COMMAND", row[0][_RPL:])
                 continue
             # Check to see if we have a marker for rows of objects or data
             for obj in _IMPORT_LIST:
@@ -336,7 +388,13 @@ def _build_create_table(db_name, tbl_name, engine, columns, col_ref={}):
 
     Returns (string) the CREATE TABLE statement.
     """
-    create_str = "CREATE TABLE `%s`.`%s` (\n" % (db_name, tbl_name)
+    # Quote db_name and tbl_name with backticks if needed
+    if not is_quoted_with_backticks(db_name):
+        db_name = quote_with_backticks(db_name)
+    if not is_quoted_with_backticks(tbl_name):
+        tbl_name = quote_with_backticks(tbl_name)
+
+    create_str = "CREATE TABLE %s.%s (\n" % (db_name, tbl_name)
     stop = len(columns)
     pri_keys = []
     keys = []
@@ -353,8 +411,12 @@ def _build_create_table(db_name, tbl_name, engine, columns, col_ref={}):
     constraints = []
     for column in range(0,stop):
         cur_col = columns[column]
-        create_str += "  `%s` %s" % (cur_col[col_name_index],
-                                     cur_col[col_type_index])
+        # Quote column name with backticks if needed
+        col_name = cur_col[col_name_index]
+        if not is_quoted_with_backticks(col_name):
+            col_name = quote_with_backticks(col_name)
+        create_str = "%s  %s %s" % (create_str, col_name,
+                                   cur_col[col_type_index])
         if cur_col[is_null_index].upper() != "YES":
             create_str += " NOT NULL"
         if len(cur_col[def_index]) > 0 and cur_col[def_index].upper() != "NONE":
@@ -373,28 +435,41 @@ def _build_create_table(db_name, tbl_name, engine, columns, col_ref={}):
         key_str = ",\n  PRIMARY KEY("
     elif len(keys) > 0:
         key_list = keys
-        key_str = ",\n  KEY `%s` (" % cur_col[const_name_index]
-        constraints.append((cur_col[const_name_index], cur_col[ref_tbl_index],
-                            cur_col[ref_col_index], cur_col[ref_col_ref]))
+        # Quote constraint name with backticks if needed
+        const_name = cur_col[const_name_index]
+        if const_name and not is_quoted_with_backticks(const_name):
+            const_name = quote_with_backticks(const_name)
+        key_str = ",\n  KEY %s (" % const_name
+        constraints.append([const_name, cur_col[ref_tbl_index],
+                            cur_col[ref_col_index], cur_col[ref_col_ref]])
     if len(key_str) > 0:
         stop = len(key_list)
         for key in range(0,stop):
-            key_str += "`%s`" % key_list[key]
+            # Quote keys with backticks if needed
+            if key_list[key] and not is_quoted_with_backticks(key_list[key]):
+                key_list[key] = quote_with_backticks(key_list[key])
+            key_str += "%s" % key_list[key]
             if key+1 < stop-1:
                 key_str += ", "
         key_str += ")"
         create_str += key_str
     if len(constraints) > 0:
         for constraint in constraints:
-            constraint_str = "  CONSTRAINT `%s` " % constraint[0]
-            constraint_str += "FOREIGN KEY (`%s`) " % constraint[2]
-            constraint_str += "REFERENCES `%s` (`%s`)" % \
-                              (constraint[1], constraint[3])
-            create_str += ",\n" + constraint_str
-    create_str += "\n)"
-    if engine is not None and len(engine) > 0:
-        create_str += " ENGINE=%s" % engine
-    create_str += ";"
+            # Quote keys with backticks if needed
+            for key in constraint:
+                if key and not is_quoted_with_backticks(key):
+                    key = quote_with_backticks(key)
+            c_str = ("  CONSTRAINT {cstr} FOREIGN KEY ({fk}) REFERENCES "
+                     "{ref1} ({ref2})")
+            constraint_str = c_str.format(cstr=constraint[0], fk=constraint[2],
+                                          ref1=constraint[1],
+                                          ref2=constraint[3])
+            create_str = "%s,\n%s" % (create_str, constraint_str)
+    create_str = "%s\n)" % create_str
+    if engine and len(engine) > 0:
+        create_str = "%s ENGINE=%s" % (create_str, engine)
+    create_str = "%s;" % create_str
+
     return create_str
 
 
@@ -469,55 +544,130 @@ def _build_create_objects(obj_type, db, definitions):
                                                  col_list, col_ref)
                 create_strings.append(create_str)
         elif obj_type == "VIEW":
-            create_str = "CREATE ALGORITHM=UNDEFINED DEFINER=%s " % \
-                         defn[col_ref.get("DEFINER",2)]
-            create_str += "SQL SECURITY %s " % \
-                          defn[col_ref.get("SECURITY_TYPE",3)]
-            create_str += "VIEW `%s`.`%s` AS " % \
-                          (defn[col_ref.get("TABLE_SCHEMA",0)],
-                           defn[col_ref.get("TABLE_NAME",1)])
-            create_str += "%s; " % defn[col_ref.get("VIEW_DEFINITION",4)]
+            # Quote table schema and name with backticks if needed
+            if not is_quoted_with_backticks(defn[col_ref.get("TABLE_SCHEMA",
+                                                             0)]):
+                obj_db = quote_with_backticks(defn[col_ref.get("TABLE_SCHEMA",
+                                                               0)])
+            else:
+                obj_db = defn[col_ref.get("TABLE_SCHEMA", 0)]
+            if not is_quoted_with_backticks(defn[col_ref.get("TABLE_NAME",
+                                                             1)]):
+                obj_name = quote_with_backticks(defn[col_ref.get("TABLE_NAME",
+                                                                 1)])
+            else:
+                obj_name = defn[col_ref.get("TABLE_NAME", 1)]
+            # Create VIEW statement
+            create_str = ("CREATE ALGORITHM=UNDEFINED DEFINER={defr} "
+                          "SQL SECURITY {sec} VIEW {scma}.{tbl} AS {defv}; "
+                          ).format(defr=defn[col_ref.get("DEFINER", 2)],
+                                   sec=defn[col_ref.get("SECURITY_TYPE", 3)],
+                                   scma=obj_db, tbl=obj_name,
+                                   defv=defn[col_ref.get("VIEW_DEFINITION",
+                                                         4)])
             create_strings.append(create_str)
         elif obj_type == "TRIGGER":
-            create_str = "CREATE DEFINER=%s " % \
-                         defn[col_ref.get("DEFINER",1)]
-            create_str += "TRIGGER `%s`.`%s` %s %s " % \
-                          (db, defn[col_ref.get("TRIGGER_NAME",0)],
-                           defn[col_ref.get("ACTION_TIMING",6)],
-                           defn[col_ref.get("EVENT_MANIPULATION",2)])
-            create_str += "ON `%s`.`%s` " % \
-                          (defn[col_ref.get("EVENT_OBJECT_SCHEMA",3)],
-                           defn[col_ref.get("EVENT_OBJECT_TABLE",4)])
-            create_str += "FOR EACH %s %s;" % \
-                          (defn[col_ref.get("ACTION_ORIENTATION",5)],
-                           defn[col_ref.get("ACTION_STATEMENT",7)])
+            # Quote required identifiers with backticks
+            obj_db = quote_with_backticks(db) \
+                        if not is_quoted_with_backticks(db) else db
+
+            if not is_quoted_with_backticks(defn[col_ref.get("TRIGGER_NAME",
+                                                             0)]):
+                obj_name = quote_with_backticks(defn[col_ref.get("TRIGGER_NAME",
+                                                                 0)])
+            else:
+                obj_name = defn[col_ref.get("TRIGGER_NAME", 0)]
+
+            if not is_quoted_with_backticks(
+                        defn[col_ref.get("EVENT_OBJECT_SCHEMA", 3)]):
+                evt_scma = quote_with_backticks(
+                                defn[col_ref.get("EVENT_OBJECT_SCHEMA", 3)])
+            else:
+                evt_scma = defn[col_ref.get("EVENT_OBJECT_SCHEMA", 3)]
+
+            if not is_quoted_with_backticks(
+                        defn[col_ref.get("EVENT_OBJECT_TABLE", 4)]):
+                evt_tbl = quote_with_backticks(
+                                defn[col_ref.get("EVENT_OBJECT_TABLE", 4)])
+            else:
+                evt_tbl = defn[col_ref.get("EVENT_OBJECT_TABLE", 4)]
+
+            # Create TRIGGER statement
+            # Important Note: There is a bug in the server when backticks are
+            # used in the trigger statement, i.e. the ACTION_STATEMENT value in
+            # INFORMATION_SCHEMA.TRIGGERS is incorrect (see BUG##16291011).
+            create_str = ("CREATE DEFINER={defr} "
+                          "TRIGGER {scma}.{trg} {act_t} {evt_m} "
+                          "ON {evt_s}.{evt_t} FOR EACH {act_o} {act_s};"
+                          ).format(defr=defn[col_ref.get("DEFINER", 1)],
+                                   scma=obj_db, trg=obj_name,
+                                   act_t=defn[col_ref.get("ACTION_TIMING", 6)],
+                                   evt_m=defn[col_ref.get("EVENT_MANIPULATION",
+                                                          2)],
+                                   evt_s=evt_scma, evt_t=evt_tbl,
+                                   act_o=defn[col_ref.get("ACTION_ORIENTATION",
+                                                          5)],
+                                   act_s=defn[col_ref.get("ACTION_STATEMENT",
+                                                          7)])
             create_strings.append(create_str)
         elif obj_type in ("PROCEDURE", "FUNCTION"):
-            create_str = "CREATE DEFINER=%s" % defn[col_ref.get("DEFINER",5)]
-            create_str += " %s `%s`.`%s`(%s)" % \
-                          (obj_type, db,
-                           defn[col_ref.get("NAME",0)],
-                           defn[col_ref.get("PARAM_LIST",6)])
+            # Quote required identifiers with backticks
+            obj_db = quote_with_backticks(db) \
+                        if not is_quoted_with_backticks(db) else db
+
+            if not is_quoted_with_backticks(defn[col_ref.get("NAME", 0)]):
+                obj_name = quote_with_backticks(defn[col_ref.get("NAME", 0)])
+            else:
+                obj_name = defn[col_ref.get("NAME", 0)]
+
+            # Create PROCEDURE or FUNCTION statement
             if obj_type == "FUNCTION":
-                create_str += " RETURNS %s" % defn[col_ref.get("RETURNS",7)]
-            create_str += " %s;" % defn[col_ref.get("BODY",8)]
+                func_str = " RETURNS %s" % defn[col_ref.get("RETURNS", 7)]
+                if defn[col_ref.get("IS_DETERMINISTI", 3)] == 'YES':
+                    func_str = "%s DETERMINISTIC" % func_str
+            else:
+                func_str = ""
+            create_str = ("CREATE DEFINER={defr}"
+                          " {type} {scma}.{name}({par_lst})"
+                          "{func_ret} {body};"
+                          ).format(defr=defn[col_ref.get("DEFINER", 5)],
+                                   type=obj_type, scma=obj_db, name=obj_name,
+                                   par_lst=defn[col_ref.get("PARAM_LIST", 6)],
+                                   func_ret=func_str,
+                                   body=defn[col_ref.get("BODY", 8)])
             create_strings.append(create_str)
         elif obj_type == "EVENT":
-            create_str = "CREATE EVENT `%s`.`%s` " % \
-                         (db, defn[col_ref.get("NAME",0)])
-            create_str += "ON SCHEDULE EVERY %s %s " % \
-                          (defn[col_ref.get("INTERVAL_VALUE",5)],
-                           defn[col_ref.get("INTERVAL_FIELD",6)])
-            create_str += "STARTS '%s' " % defn[col_ref.get("STARTS",8)]
-            ends_index = col_ref.get("ENDS",9)
+            # Quote required identifiers with backticks
+            obj_db = quote_with_backticks(db) \
+                        if not is_quoted_with_backticks(db) else db
+
+            if not is_quoted_with_backticks(defn[col_ref.get("NAME", 0)]):
+                obj_name = quote_with_backticks(defn[col_ref.get("NAME", 0)])
+            else:
+                obj_name = defn[col_ref.get("NAME", 0)]
+
+            # Create EVENT statement
+            create_str = ("CREATE EVENT {scma}.{name} "
+                          "ON SCHEDULE EVERY {int_v} {int_f} "
+                          "STARTS '{starts}' "
+                          ).format(scma=obj_db, name=obj_name,
+                                   int_v=defn[col_ref.get("INTERVAL_VALUE",
+                                                          5)],
+                                   int_f=defn[col_ref.get("INTERVAL_FIELD",
+                                                          6)],
+                                   starts=defn[col_ref.get("STARTS", 8)]
+                                   )
+
+            ends_index = col_ref.get("ENDS", 9)
             if len(defn[ends_index]) > 0 and \
                defn[ends_index].upper() != "NONE":
-                create_str += "ENDS '%s' " % defn[ends_index]
-            if defn[col_ref.get("ON_COMPLETION",11)] == "DROP":
-                create_str += "ON COMPLETION NOT PRESERVE "
-            if defn[col_ref.get("STATUS",10)] == "DISABLED":
-                create_str += "DISABLE "
-            create_str += "DO %s;" % defn[col_ref.get("BODY",2)]
+                create_str = "%s ENDS '%s' " % (create_str, defn[ends_index])
+            if defn[col_ref.get("ON_COMPLETION", 11)] == "DROP":
+                create_str = "%s ON COMPLETION NOT PRESERVE " % create_str
+            if defn[col_ref.get("STATUS", 10)] == "DISABLED":
+                create_str = "%s DISABLE " % create_str
+            create_str = "%s DO %s;" % (create_str,
+                                        defn[col_ref.get("BODY", 2)])
             create_strings.append(create_str)
         elif obj_type == "GRANT":
             try:
@@ -529,9 +679,19 @@ def _build_create_objects(obj_type, db, definitions):
                 tbl = "*"
             elif tbl.upper() == "NONE":
                 tbl = "*"
-            create_str = "GRANT %s ON `%s`.`%s` TO %s" % (priv, db, tbl, user)
+
+            # Quote required identifiers with backticks
+            obj_db = quote_with_backticks(db) \
+                        if not is_quoted_with_backticks(db) else db
+            obj_tbl = quote_with_backticks(tbl) \
+                        if (tbl != '*'
+                            and not is_quoted_with_backticks(tbl)) else tbl
+
+            # Create GRANT statement
+            create_str = "GRANT %s ON %s.%s TO %s" % (priv, obj_db, obj_tbl,
+                                                      user)
             create_strings.append(create_str)
-        elif obj_type == "RPL_COMMAND":
+        elif obj_type in ["RPL_COMMAND", "GTID_COMMAND"]:
             create_strings.append([defn])
         else:
             raise UtilError("Unknown object type discovered: %s" % obj_type)
@@ -704,12 +864,13 @@ def _exec_statements(statements, destination, format, options, dryrun=False):
             if dryrun:
                 print statement
             elif format != "sql" or not _skip_sql(statement, options):
-                destination.exec_query(statement)
+                res = destination.exec_query(statement)
         # Here we capture any exception and raise UtilError to communicate to
         # the script/user. Since all util errors (exceptions) derive from
         # Exception, this is safe.
         except Exception, e:
-            raise UtilError("Invalid statement:\n%s" % statement)
+            raise UtilError("Invalid statement:\n%s" % statement +
+                            "\nERROR: %s" % e.errmsg)
     return True
 
 
@@ -721,7 +882,7 @@ def _get_column_metadata(tbl_class, table_col_list):
     """
 
     for tbl_col_def in table_col_list:
-        if tbl_col_def[0] == tbl_class.tbl_name:
+        if tbl_col_def[0] == tbl_class.q_tbl_name:
             tbl_class.get_column_metadata(tbl_col_def[1])
             return True
     return False
@@ -789,7 +950,7 @@ def import_file(dest_val, file_name, options):
         if not col_meta:
             raise UtilError("Cannot build bulk insert statements without "
                                  "the table definition.")
-        ins_strs = tbl.make_bulk_insert(table_rows, tbl.db_name)
+        ins_strs = tbl.make_bulk_insert(table_rows, tbl.q_db_name)
         if len(ins_strs[0]) > 0:
             statements.extend(ins_strs[0])
         if len(ins_strs[1]) > 0 and not skip_blobs:
@@ -805,6 +966,7 @@ def import_file(dest_val, file_name, options):
     dryrun = options.get("dryrun", False)
     do_drop = options.get("do_drop", False)
     skip_blobs = options.get("skip_blobs", False)
+    skip_gtid = options.get("skip_gtid", False)
 
     # Attempt to connect to the destination server
     conn_options = {
@@ -845,6 +1007,10 @@ def import_file(dest_val, file_name, options):
     table_col_list = []
     tbl_name = ""
     skip_rpl = options.get("skip_rpl", False)
+    gtid_command_found = False
+    supports_gtid = servers[0].supports_gtid() == 'ON'
+    skip_gtid_warning_printed = False
+    gtid_version_checked = False
 
     # Read the file one object/definition group at a time
     for row in read_next(file, format):
@@ -853,19 +1019,38 @@ def import_file(dest_val, file_name, options):
             if not skip_rpl:
                 statements.append(row[1])
             continue
+        if row[0] == "GTID_COMMAND":
+            gtid_command_found = True
+            if not supports_gtid:
+                # only display warning once
+                if not skip_gtid_warning_printed:
+                    print _GTID_SKIP_WARNING
+                    skip_gtid_warning_printed = True
+            elif not skip_gtid:
+                if not gtid_version_checked:
+                    gtid_version_checked = True
+                    # Check GTID version for complete feature support
+                    servers[0].check_gtid_version()
+                    # Check the gtid_purged value too
+                    servers[0].check_gtid_executed("import")
+                statements.append(row[1])
+            continue
         # If this is the first pass, get the database name from the file
         if get_db:
             if skip_header:
                 skip_header = False
             else:
                 db_name = _get_db(row)
+                # quote db_name with backticks if needed
+                if db_name and not is_quoted_with_backticks(db_name):
+                    db_name = quote_with_backticks(db_name)
                 get_db = False
                 if do_drop and import_type != "data":
-                    statements.append("DROP DATABASE IF EXISTS `%s`;" % \
-                                      db_name)
+                    statements.append("DROP DATABASE IF EXISTS %s;" % db_name)
                 if import_type != "data":
-                    if not _skip_object("CREATE_DB", options):
-                        statements.append("CREATE DATABASE `%s`;" % db_name)
+                    if not _skip_object("CREATE_DB", options) and \
+                       not format == 'sql':
+                        statements.append("CREATE DATABASE %s;" % db_name)
 
         # This is the first time through the loop so we must
         # check user permissions on source for all databases
@@ -919,6 +1104,11 @@ def import_file(dest_val, file_name, options):
                             table_rows = []
                         read_columns = True
                         tbl_name = row[1]
+                        if not is_quoted_with_backticks(tbl_name):
+                            db, sep, tbl = tbl_name.partition('.')
+                            q_db = quote_with_backticks(db)
+                            q_tbl = quote_with_backticks(tbl)
+                            tbl_name = ".".join([q_db, q_tbl])
                     else:
                         if read_columns:
                             columns = row[1]
@@ -946,6 +1136,10 @@ def import_file(dest_val, file_name, options):
     _exec_statements(statements, destination, format, options, dryrun)
 
     file.close()
+    
+    # Check gtid process
+    if supports_gtid and not gtid_command_found:
+        print _GTID_MISSING_WARNING
 
     if not quiet:
         print "#...done."

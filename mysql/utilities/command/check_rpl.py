@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2010, 2012 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,7 +21,7 @@ setup.
 """
 
 import sys
-from mysql.utilities.exception import UtilError, UtilRplError
+from mysql.utilities.exception import UtilError, UtilRplError, UtilRplWarn
 
 _PRINT_WIDTH = 75    
 _RPL_HOST, _RPL_USER = 1, 2
@@ -38,6 +37,7 @@ def _get_replication_tests(rpl, options):
         _TestBinlogExceptions(rpl, options),
         _TestRplUser(rpl, options),
         _TestServerIds(rpl, options),
+        _TestUUIDs(rpl, options),
         _TestSlaveConnection(rpl, options),
         _TestMasterInfo(rpl, options),
         _TestInnoDB(rpl, options),
@@ -50,8 +50,10 @@ def _get_replication_tests(rpl, options):
 def check_replication(master_vals, slave_vals, options):
     """Check replication among a master and a slave.
     
-    master_vals[in]    Master connection in form user:passwd@host:port:sock
-    slave_vals[in]     Slave connection in form user:passwd@host:port:sock
+    master_vals[in]    Master connection in form: user:passwd@host:port:socket
+                       or login-path:port:socket
+    slave_vals[in]     Slave connection in form user:passwd@host:port:socket
+                       or login-path:port:socket
     options[in]        dictionary of options (verbosity, quiet, pedantic)
     
     Returns bool - True if all tests pass, False if errors, warnings, failures
@@ -215,6 +217,14 @@ class _BaseTestReplication(object):
                 print "Test: %s failed. Error: %s" % (self.description,
                                                       e.errmsg)
             return False
+        # Check for warnings
+        except UtilRplWarn, e:
+            if not self.quiet:
+                self.report_status("WARN", [e.errmsg])
+            else:
+                print "Test: %s had warnings. %s" % (self.description,
+                                                     e.errmsg)
+            return False
 
         # Check to see if test passed or if there were errors returned.
         if (type(res) == list and res == []) or \
@@ -275,7 +285,7 @@ class _TestRplUser(_BaseTestReplication):
         if res is None or res == []:
             raise UtilRplError("Slave is not connected to a master.")
         return self.rpl.master.check_rpl_user(res[0][_RPL_USER],
-                                              res[0][_RPL_HOST])
+                                              self.rpl.slave.host)
 
 class _TestServerIds(_BaseTestReplication):
     """Test server ids are different.
@@ -296,6 +306,29 @@ class _TestServerIds(_BaseTestReplication):
             slave_id = self.rpl.slave.get_server_id()
             print "\n master id = %s" % master_id
             print "  slave id = %s\n" % slave_id
+            
+
+class _TestUUIDs(_BaseTestReplication):
+    """Test server uuids are different.
+    """
+    
+    def rpl_test(self):
+        """Execute test.
+        """
+        # Check server ids
+        self.report_test("Checking server_uuid values")
+        return self.rpl.check_server_uuids()
+        
+    def report_epilog(self):
+        """Report server_ids.
+        """
+        if self.verbosity > 0 and not self.quiet:
+            master_uuid = self.rpl.master.get_server_uuid()
+            slave_uuid = self.rpl.slave.get_server_uuid()
+            print "\n master uuid = %s" % \
+                  (master_uuid if master_uuid is not None else "Not supported.")
+            print "  slave uuid = %s\n" % \
+                  (slave_uuid if slave_uuid is not None else "Not supported.")
             
 
 class _TestSlaveConnection(_BaseTestReplication):
@@ -319,16 +352,22 @@ class _TestMasterInfo(_BaseTestReplication):
         """Execute test.
         """
         # Check master.info file
+        from mysql.utilities.common.replication import MasterInfo
+        
         self.warning = True
+        m_info = MasterInfo(self.rpl.slave, self.options)
         self.report_test("Check master information file")
-        return self.rpl.slave.check_master_info(self.options)
+        return m_info.check_master_info()
         
     def report_epilog(self):
         """Report master info contents.
         """
+        from mysql.utilities.common.replication import MasterInfo
+        
         if self.verbosity > 0 and not self.quiet:
+            m_info = MasterInfo(self.rpl.slave, self.options)
             print "\n#\n# Master information file: \n#" 
-            self.rpl.slave.show_master_info(self.options)
+            master_info = m_info.show_master_info()
             print
             
 

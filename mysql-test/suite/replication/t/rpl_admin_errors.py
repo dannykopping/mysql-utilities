@@ -1,8 +1,23 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 import rpl_admin
+import socket
 from mysql.utilities.exception import MUTLibError
 
 class test(rpl_admin.test):
@@ -77,11 +92,58 @@ class test(rpl_admin.test):
                 raise MUTLibError("%s: failed" % comment)
             test_num += 1
 
+        # Now test to see what happens when master is listed as a slave
+        comment = "Test case %s - Master listed as a slave - literal" % test_num
+        cmd_str = "%s health %s %s,%s" % (base_cmd, master_str, slaves_str, master_conn)
+        res = mutlib.System_test.run_test_case(self, 2, cmd_str,
+                                               comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+        test_num += 1
+
+        comment = "Test case %s - Master listed as a slave - alias"  % test_num
+        cmd_str = "%s health %s %s" % (base_cmd, master_str,
+                  "--slaves=root:root@%s:%s" % \
+                    (socket.gethostname().split('.', 1)[0], self.server1.port))
+        res = mutlib.System_test.run_test_case(self, 2, cmd_str,
+                                               comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+        test_num += 1
+
+        comment = "Test case %s - Master listed as a candiate - alias" % test_num
+        cmd_str = "%s elect %s %s %s" % (base_cmd, master_str,
+                  "--candidates=root:root@%s:%s" % \
+                    (socket.gethostname().split('.', 1)[0], self.server1.port),
+                  slaves_str)
+        res = mutlib.System_test.run_test_case(self, 2, cmd_str,
+                                               comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+        test_num += 1
+
         # Now we return the topology to its original state for other tests
         rpl_admin.test.reset_topology(self)
 
         # Mask out non-deterministic data
         rpl_admin.test.do_masks(self)
+
+        self.replace_result("mysqlrpladmin.py: error: New master connection "
+                            "values invalid",
+                            "mysqlrpladmin.py: error: New master connection "
+                            "values invalid\n")
+        self.replace_result("ERROR: Master connection values invalid or "
+                            "cannot be parsed",
+                            "ERROR: Master connection values invalid or "
+                            "cannot be parsed\n")
+        self.replace_result("ERROR: Slave connection values invalid or "
+                            "cannot be parsed",
+                            "ERROR: Slave connection values invalid or "
+                            "cannot be parsed\n")
+        self.replace_result("ERROR: Candidate connection values invalid or "
+                            "cannot be parsed",
+                            "ERROR: Candidate connection values invalid or "
+                            "cannot be parsed\n")
 
         return True
 

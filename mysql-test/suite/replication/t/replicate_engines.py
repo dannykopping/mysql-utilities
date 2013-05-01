@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import replicate
 from mysql.utilities.exception import MUTLibError
@@ -98,7 +112,7 @@ class test(replicate.test):
                                  comment, None)
         if not res:
             raise MUTLibError("%s: failed" % comment)
-        
+            
         comment = "Test case 2 - use pedantic to fail if slave has " \
                   "different default engines"
         res = self.run_test_case(self.server3, self.server2, self.s3_serverid,
@@ -132,6 +146,11 @@ class test(replicate.test):
             raise MUTLibError("%s: Failed to stop slave." % comment)
 
         replicate.test.mask_results(self)
+
+        # Mask out inconsistent results when run on slower machines
+        self.remove_result("# status: Queueing master event to the relay log")
+        self.remove_result("# error: 0:")
+        self.remove_result("# Waiting for slave to synchronize with master")
         
         return True
 

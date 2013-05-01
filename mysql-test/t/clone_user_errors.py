@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import clone_user
 
@@ -68,8 +82,16 @@ class test(clone_user.test):
             raise MUTLibError("%s: failed" % comment)
             
         # Replace error code.
-        self.replace_result("Error 1045:", "Error XXXX: Access denied\n")
-        self.replace_result("Error 2003:", "Error XXXX: Access denied\n")
+        self.replace_result("Error 1045", "Error XXXX: Access denied\n")
+        self.replace_result("Error 2003", "Error XXXX: Access denied\n")
+        self.replace_result("mysqluserclone.py: error: Source connection "
+                            "values invalid",
+                            "mysqluserclone.py: error: Source connection "
+                            "values invalid\n")
+        self.replace_result("mysqluserclone.py: error: Destination connection "
+                            "values invalid",
+                            "mysqluserclone.py: error: Destination connection "
+                            "values invalid\n")
 
         return True
 

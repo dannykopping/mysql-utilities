@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,6 +19,13 @@ import re
 import sys
 
 import mysql.connector
+
+from mysql.utilities.common.format import print_list
+from mysql.utilities.common.options import parse_connection
+
+from mysql.utilities.exception import EmptyResultError
+from mysql.utilities.exception import FormatError
+
 
 KILL_QUERY, KILL_CONNECTION, PRINT_PROCESS = range(3)
 
@@ -186,9 +192,6 @@ class ProcessGrep(object):
           format           format for display
                            default = GRID
         """
-        from mysql.utilities.exception import EmptyResultError
-        from ..common.options import parse_connection
-        from ..common.format import print_list
 
         output = kwrds.get('output', sys.stdout)
         connector = kwrds.get('connector', mysql.connector)
@@ -217,6 +220,7 @@ class ProcessGrep(object):
         
         # If output is None, nothing is printed
         if len(entries) > 0 and output:
+            entries.sort(key = lambda fifth:fifth[5]) 
             print_list(output, format, headers, entries)
         elif PRINT_PROCESS in self.__actions:
             raise EmptyResultError("No matches found")

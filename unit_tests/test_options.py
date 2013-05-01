@@ -1,3 +1,19 @@
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import unittest
 
 from mysql.utilities.common.options import parse_connection
@@ -42,7 +58,7 @@ class TestParseConnection(unittest.TestCase):
 
     # These specifiers are invalid and should generate a FormatError.
     invalid_specificers = [
-        'mats', 'mats@', '@localhost', 'cbell@what:is::::this?',
+        'mats@', '@localhost', 'cbell@what:is::::this?',
         'cbell@1:2:3:4:5:6:192.168.1.110',
         'cbell@E3D7::51F4:9BC8:192.168.100.32',
         ]

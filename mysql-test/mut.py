@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2010, 2012 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013 Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,12 +20,17 @@ This file contains the MySQL Utilities Test facility for running system
 tests on the MySQL Utilities.
 """
 
+import sys
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version(name='MySQL Utilities Test')
+
 import csv
 import datetime
 import optparse
 import os
 import re
-import sys
 import time
 from mysql.utilities.common.server import Server, get_local_servers
 from mysql.utilities.common.tools import get_tool_path
@@ -34,7 +38,7 @@ from mysql.utilities.common.options import parse_connection, add_verbosity
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.exception import MUTLibError
 from mutlib.mutlib import Server_list
-
+    
 # Constants
 NAME = "MySQL Utilities Test - mut "
 DESCRIPTION = "mut - run tests on the MySQL Utilities"
@@ -82,11 +86,11 @@ def _shutdown_running_servers(server_list, processes, basedir):
             connection["port"] = process[1]
 
         if os.name == "posix":
-            print "  Process id: %6d, Data path: %s" % \
-                   (int(process[0]), process[1])
+            print("  Process id: %6d, Data path: %s" % \
+                   (int(process[0]), process[1]))
         elif os.name == "nt":
-            print "  Process id: %6d, Port: %s" % \
-                   (int(process[0]), process[1])
+            print("  Process id: %6d, Port: %s" % \
+                   (int(process[0]), process[1]))
 
         # 1) connect to the server.
         server_options = {
@@ -98,7 +102,7 @@ def _shutdown_running_servers(server_list, processes, basedir):
             svr.connect()
         except:  # if we cannot connect, don't try to shut it down.
             ok_to_shutdown = False
-            print "    WARNING: shutdown failed - cannot connect."
+            print("    WARNING: shutdown failed - cannot connect.")
         if not ok_to_shutdown and os.name == "posix":
             # Attempt kill
             os.system("kill -9 %s" % process[0])
@@ -113,8 +117,9 @@ def _shutdown_running_servers(server_list, processes, basedir):
         if ok_to_shutdown and svr:
             try:
                 server_list.stop_server(svr)
-            except MUTLibError, e:
-                print "    WARNING: shutdown failed: " + e.errmsg
+            except MUTLibError:
+                _, e, _ = sys.exc_info()
+                print("    WARNING: shutdown failed: " + e.errmsg)
     return True
 
 # Utility function
@@ -148,8 +153,11 @@ def _report_error(message, test_name, mode, start_test, error=True):
         fishy = "ERROR"
     else:
         fishy = "WARNING"
-    print "\n%s%s%s: %s\n" % (BOLD_ON, fishy, BOLD_OFF, message)
-    failed_tests.append(test)
+    print("\n%s%s%s: %s\n" % (BOLD_ON, fishy, BOLD_OFF, message))
+    if mode == "FAIL":
+        failed_tests.append(test)
+    else:
+        skipped_tests.append(test)
 
 # Helper method to manage exception handling
 def _exec_and_report(procedure, default_message, test_name, action,
@@ -159,12 +167,13 @@ def _exec_and_report(procedure, default_message, test_name, action,
         res = procedure()
         if res:
             return True
-    except MUTLibError, e:
+    except MUTLibError:
+        _, e, _ = sys.exc_info()
         extra_message = e.errmsg
     _report_error(default_message, test_name, action, start_test_time)
     # print the error if raised from the test.
     if extra_message is not None:
-        print "%s\n" % extra_message
+        print("%s\n" % extra_message)
     # if there is an exit strategy, execute it
     if exception_procedure is not None:
         exception_procedure()
@@ -243,11 +252,15 @@ def find_tests(path):
                     pass
                 else:
                     if opt.wildcard:
-                        if opt.wildcard == fname[0:len(opt.wildcard)]:
-                            test_files.append(test_ref)
+                        for wild in opt.wildcard:
+                            if wild == fname[0:len(wild)]:
+                                test_files.append(test_ref)
+                                break
                     elif opt.skip_tests:
-                        if opt.skip_tests != fname[0:len(opt.skip_tests)]:
-                            test_files.append(test_ref)
+                        for skip in opt.skip_tests:
+                            if skip != fname[0:len(skip)]:
+                                test_files.append(test_ref)
+                                break
                     # Add test if no wildcard and suite (dir) is included
                     else:
                         test_files.append(test_ref)
@@ -268,9 +281,10 @@ parser.add_option("--server", action="append", dest="servers",
                   "- list option multiple times for multiple servers to use")
 
 # Add test wildcard option
-parser.add_option("--do-tests", action="store", dest="wildcard",
+parser.add_option("--do-tests", action="append", dest="wildcard",
                   type = "string", help="execute all tests that begin " \
-                         "with this string")
+                         "with this string. List option multiple times "
+                         "to add multiple wildcards.")
 
 # Add suite list option
 parser.add_option("--suite", action="append", dest="suites",
@@ -279,18 +293,25 @@ parser.add_option("--suite", action="append", dest="suites",
 
 # Add skip-test list option
 parser.add_option("--skip-test", action="append", dest="skip_test",
-                  type = "string", help="exclude a test - list "
+                  type = "string", help="exclude a specific test - list "
                   "option multiple times for multiple tests")
 
 # Add skip-test list option
-parser.add_option("--skip-tests", action="store", dest="skip_tests",
+parser.add_option("--skip-tests", action="append", dest="skip_tests",
                   type = "string", help="exclude tests that begin with "
-                  "this string")
+                  "this string. List option multiple times to add "
+                  "multiple skips.")
 
 # Add start-test list option
 parser.add_option("--start-test", action="store", dest="start_test",
                   type = "string", help="start executing tests that begin "
                   "with this string", default=None)
+
+# Add start-test list option
+parser.add_option("--stop-test", action="store", dest="stop_test",
+                  type = "string", help="stop executing tests at first "
+                  "occurrence of test that begins with this string",
+                  default=None)
 
 # Add skip-long tests option
 parser.add_option("--skip-long", action="store_true", dest="skip_long",
@@ -339,6 +360,10 @@ parser.add_option("-f", "--force", action="store_true", dest="force",
 # Add verbosity mode
 add_verbosity(parser, False)
 
+# Skip cleanup mode
+parser.add_option("--skip-cleanup", action="store_true", dest="skip_cleanup",
+                  help="Do not shutdown spawned servers - debug only mode.")
+
 # Now we process the rest of the arguments.
 opt, args = parser.parse_args()
 
@@ -365,14 +390,14 @@ sys.path.append(opt.utildir)
 # Process the server connections
 
 # Print preamble
-print "\nMySQL Utilities Testing - MUT\n"
-print "Parameters used: "
-print "  Display Width       = %d" % (opt.width)
-print "  Sort                = %s" % (opt.sort)
-print "  Force               = %s" % (opt.force is not None)
-print "  Test directory      = '%s'" % (opt.testdir)
-print "  Utilities directory = '%s'" % (opt.utildir)
-print "  Starting port       = %d" % int(opt.start_port)
+print("\nMySQL Utilities Testing - MUT\n")
+print("Parameters used: ")
+print("  Display Width       = %d" % (opt.width))
+print("  Sort                = %s" % (opt.sort))
+print("  Force               = %s" % (opt.force is not None))
+print("  Test directory      = '%s'" % (opt.testdir))
+print("  Utilities directory = '%s'" % (opt.utildir))
+print("  Starting port       = %d" % int(opt.start_port))
 
 # Check for suite list
 if opt.suites:
@@ -390,7 +415,8 @@ if opt.skip_suites:
 
 # Is there a --do-test?
 if opt.wildcard:
-    print "  Test wildcard       = '%s%%'" % opt.wildcard
+    for wild in opt.wildcard:
+        print("  Test wildcard       = '%s%%'" % wild)
 
 # Check to see if we're skipping tests
 if opt.skip_test:
@@ -400,21 +426,25 @@ if opt.skip_test:
     print
 
 if opt.skip_tests:
-    print "  Skip wildcard       = '%s%%'" % opt.skip_tests
+    for skip in opt.skip_tests:
+        print("  Skip wildcard       = '%s%%'" % skip)
 
 if opt.start_test:
-    print "  Start test sequence = '%s%%'" % opt.start_test
+    print("  Start test sequence = '%s%%'" % opt.start_test)
     start_sequence = True
 else:
     start_sequence = False
+
+if opt.stop_test:
+    print("  Stop test           = '%s%%'" % opt.stop_test)
 
 server_list = Server_list([], opt.start_port, opt.utildir, verbose_mode)
 basedir = None
 
 # Print status of connections
-print "\nServers:"
+print("\nServers:")
 if not opt.servers:
-    print "  No servers specified."
+    print("  No servers specified.")
 else:
     i = 0
     for server in opt.servers:
@@ -447,21 +477,22 @@ else:
         try:
             conn.connect()
             server_list.add_new_server(conn)
-            print "CONNECTED"
+            print("CONNECTED")
             res = conn.show_server_variable("basedir")
             #print res
             basedir = res[0][1]
         # Here we capture any exception and print the error message.
         # Since all util errors (exceptions) derive from Exception, this is
         # safe.
-        except Exception, e:
-            print "%sFAILED%s" % (BOLD_ON, BOLD_OFF)
+        except Exception:
+            _, err, _ = sys.exc_info()
+            print("%sFAILED%s" % (BOLD_ON, BOLD_OFF))
             if conn.connect_error is not None:
-                print conn.connect_error
-            print "ERROR:", e.errmsg
+                print(conn.connect_error)
+            print("ERROR: %s" % str(err))
     if server_list.num_servers() == 0:
-        print "ERROR: Failed to connect to any servers listed."
-        exit(1)
+        print("ERROR: Failed to connect to any servers listed.")
+        sys.exit(1)
 
 # Check for running servers
 processes = []
@@ -471,19 +502,20 @@ if server_list.num_servers():
 # Kill any servers running from the test directory
 if len(processes) > 0:
     print
-    print "WARNING: There are existing servers running that may have been\n" \
-          "spawned by an earlier execution. Attempting shutdown.\n"
+    print("WARNING: There are existing servers running that may have been\n"
+          "spawned by an earlier execution. Attempting shutdown.\n")
     _shutdown_running_servers(server_list, processes, basedir)
 
 test_files = []
 failed_tests = []
+skipped_tests = []
 
 test_files.extend(find_tests(SUITE_PATH))                    
 test_files.extend(find_tests(opt.testdir))
 
 # If no tests, there's nothing to do!
 if len(test_files) == 0:
-    print "No tests match criteria specified."
+    print("No tests match criteria specified.")
 
 # Sort test cases
 test_files.sort(reverse=(opt.sort == 'desc'))
@@ -495,9 +527,20 @@ if start_sequence:
         if opt.start_test == test_tuple[2][0:len(opt.start_test)]:
             found = True
     if not found:
-        print "\nWARNING: --start-test=%s%% was not found. Running full " \
-              "suite(s)" % opt.start_test
+        print("\nWARNING: --start-test=%s%% was not found. Running full "
+              "suite(s)" % opt.start_test)
         start_sequence = False
+
+# Check for validity of --stop-test
+if opt.stop_test:
+    found = False
+    for test_tuple in test_files:
+        if opt.stop_test == test_tuple[2][0:len(opt.stop_test)]:
+            found = True
+    if not found:
+        print("\nWARNING: --stop-test=%s%% was not found. Running full "
+              "suite(s)" % opt.stop_test)
+        opt.stop_test = None
 
 # Get list of disabled tests
 disable_list = _read_disabled_tests()
@@ -505,9 +548,9 @@ disable_list = _read_disabled_tests()
 have_disabled = len(disable_list)
 
 # Print header
-print "\n" + "-" * opt.width
-print "TEST NAME", ' ' * (opt.width - 24), "STATUS   TIME"
-print "=" * opt.width
+print("\n" + "-" * opt.width)
+print("".join(["TEST NAME", ' ' * (opt.width - 24), "STATUS   TIME"]))
+print("=" * opt.width)
 
 # Protect against interactive consoles that fail: save terminal settings.
 if os.name == "posix":
@@ -517,6 +560,7 @@ if os.name == "posix":
 # Run the tests selected
 num_tests_run = 0
 last_test = None
+stop_testing = False
 for test_tuple in test_files:
 
     # Skip tests for start-test sequence
@@ -525,6 +569,12 @@ for test_tuple in test_files:
             start_sequence = False
         else:
             continue
+
+    # Skip tests for stop-test sequence
+    if opt.stop_test and not stop_testing:
+        stop_testing = (opt.stop_test == test_tuple[2][0:len(opt.stop_test)])
+    if stop_testing:
+        continue
 
     # Get test parts - directory not used
     test = test_tuple[2]
@@ -587,7 +637,8 @@ for test_tuple in test_files:
     run_msg = None
     try:
         run_ok = test_case.run()
-    except MUTLibError, e:
+    except MUTLibError:
+        _, e, _ = sys.exc_info()
         if debug_mode:
             # Using debug should result in a skipped result check.
             run_ok
@@ -612,7 +663,7 @@ for test_tuple in test_files:
                       (BOLD_ON, BOLD_OFF))
 
         elif debug_mode:
-            print "\nEnd debug results.\n"
+            print("\nEnd debug results.\n")
 
         # Display status of test
         else:
@@ -623,7 +674,8 @@ for test_tuple in test_files:
                 if results[0]:
                     sys.stdout.write("[pass]")
                     num_tests_run += 1
-            except MUTLibError, e:
+            except MUTLibError:
+                _, e, _ = sys.exc_info()
                 results = (False, ("Test results cannot be established.\n",
                                    e.errmsg + "\n"))
                 msg = e.errmsg
@@ -635,7 +687,7 @@ for test_tuple in test_files:
 
     else:
         _report_error("Test execution failed.", test_name, "FAIL", start_test)
-        print "%s\n" % run_msg
+        print("%s\n" % run_msg)
         run_ok = False
 
     # Cleanup the database settings if needed
@@ -643,7 +695,8 @@ for test_tuple in test_files:
     cleanup_msg = None
     try:
         test_cleanup_ok = test_case.cleanup()
-    except MUTLibError, e:
+    except MUTLibError:
+        _, e, _ = sys.exc_info()
         cleanup_msg = e.errmsg
         test_cleanup_ok = False
 
@@ -653,9 +706,9 @@ for test_tuple in test_files:
 
     # Display warning about cleanup
     if not test_cleanup_ok:
-        print "\n%sWARNING%s: Test cleanup failed." % (BOLD_ON, BOLD_OFF)
+        print("\n%sWARNING%s: Test cleanup failed." % (BOLD_ON, BOLD_OFF))
         if cleanup_msg is not None:
-            print "%s\n" % cleanup_msg
+            print("%s\n" % cleanup_msg)
 
     if results is not None and results[1]:
         sys.stdout.write("\n%sERROR:%s " % (BOLD_ON, BOLD_OFF))
@@ -664,38 +717,43 @@ for test_tuple in test_files:
         sys.stdout.write("\n")
 
     if verbose_mode:
-        print test_case.__doc__
+        print(test_case.__doc__)
 
     # Check force option
     if not run_ok and not opt.force:
         break
 
 # Print postamble
-print "-" * opt.width
-print datetime.datetime.now().strftime("Testing completed: "
-                                       "%A %d %B %Y %H:%M:%S\n")
+print("-" * opt.width)
+print(datetime.datetime.now().strftime("Testing completed: "
+                                       "%A %d %B %Y %H:%M:%S\n"))
 num_fail = len(failed_tests)
+num_skip = len(skipped_tests)
 num_tests = len(test_files)
-if num_fail == 0:
+if num_fail == 0 and num_skip == 0:
     if num_tests > 0:
-        print "All %d tests passed." % (num_tests)
+        print("All %d tests passed." % (num_tests))
 else:
-    print "%d of %d tests completed." % \
-          (num_tests_run, num_tests)
-    print "The following tests failed or were skipped:",
-    for test in failed_tests:
-        print test,
-    print "\n"
+    print("%d of %d tests completed.\n" % (num_tests_run, num_tests))
+    if num_skip:
+        print("The following tests were skipped:\n")
+        print(" ".join(skipped_tests))
+        print("\n")
+    if num_fail:
+        print("The following tests failed:\n")
+        print(" ".join(failed_tests))
+        print("\n")
 
 # Shutdown connections and spawned servers
-if server_list.num_spawned_servers():
-    print "\nShutting down spawned servers "
-    server_list.shutdown_spawned_servers()
-
-if (server_list.cleanup_list) > 0:
-    sys.stdout.write("\nDeleting temporary files...")
-    server_list.remove_files()
-    print "success."
+if not opt.skip_cleanup:
+    if server_list.num_spawned_servers():
+        print("\nShutting down spawned servers ")
+        server_list.shutdown_spawned_servers()
+    
+    if (server_list.cleanup_list) > 0:
+        sys.stdout.write("\nDeleting temporary files...")
+        server_list.remove_files()
+        print("success.")
 
 del server_list
 
@@ -707,4 +765,4 @@ if os.name == "posix":
     termios.tcsetattr(sys.stdin, termios.TCSADRAIN,
                       old_terminal_settings)
 
-exit(0)
+sys.exit(0)

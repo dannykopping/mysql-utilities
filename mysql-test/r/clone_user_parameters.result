@@ -1,6 +1,6 @@
 Test case 1 - show the grant statements
 # Source on localhost: ... connected.
-Dumping grants for user joe_nopass@user
+# Dumping grants for user joe_nopass@user
 GRANT USAGE ON *.* TO 'joe_nopass'@'user'
 GRANT ALL PRIVILEGES ON `util_test`.* TO 'joe_nopass'@'user'
 Test case 2 - show the help
@@ -12,10 +12,12 @@ Options:
   --version             show program's version number and exit
   --help                display a help message and exit
   --source=SOURCE       connection information for source server in the form:
-                        <user>:<password>@<host>:<port>:<socket>
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>].
   --destination=DESTINATION
                         connection information for destination server in the
-                        form: <user>:<password>@<host>:<port>:<socket>
+                        form: <user>[:<password>]@<host>[:<port>][:<socket>]
+                        or <login-path>[:<port>][:<socket>].
   -d, --dump            dump GRANT statements for user - does not require a
                         destination
   --force               drop the new user if it exists

@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,7 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 
 """
@@ -81,6 +80,41 @@ def to_sql(obj):
     """
     from mysql.connector.conversion import MySQLConverter
     return MySQLConverter().quote(obj)
+
+
+def quote_with_backticks(identifier):
+    """Quote the given identifier with backticks, converting backticks (`) in
+    the identifier name with the correct escape sequence (``).
+
+    identifier[in] identifier to quote.
+
+    Returns string with the identifier quoted with backticks.
+    """
+    return "`" + identifier.replace("`", "``") + "`"
+
+
+def remove_backtick_quoting(identifier):
+    """Remove backtick quoting from the given identifier, reverting the
+    escape sequence (``) to a backtick (`) in the identifier name.
+
+    identifier[in] identifier to remove backtick quotes.
+
+    Returns string with the identifier without backtick quotes.
+    """
+    # remove backtick quotes
+    identifier = identifier[1:-1]
+    # Revert backtick escape sequence
+    return identifier.replace("``", "`")
+
+
+def is_quoted_with_backticks(identifier):
+    """Check if the given identifier is quoted with backticks.
+
+    identifier[in] identifier to check.
+
+    Returns True if the identifier has backtick quotes, and False otherwise.
+    """
+    return (identifier[0] == "`" and identifier[-1] == "`")
 
 
 def build_pkey_where_clause(table, row):
@@ -290,7 +324,7 @@ class SQLTransformer(object):
             # preamble
             { 'fmt' : "%s", 'col' : _IGNORE_COLUMN, 'val' : "ALTER DATABASE" },
             # object name
-            { 'fmt' : " `%s`", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " %s", 'col' : _IGNORE_COLUMN,
               'val' : self.destination[_DB_NAME] },
             # charset
             { 'fmt' : " CHARACTER SET %s", 'col' : _DB_CHARSET, 'val' : "" },
@@ -433,7 +467,7 @@ class SQLTransformer(object):
         # build a list of the parts
         statement_parts = [
             # rename
-            { 'fmt' : "RENAME TO `%s`.`%s` \n", 'col' : _IGNORE_COLUMN, 'val' : "" },
+            { 'fmt' : "RENAME TO %s.%s \n", 'col' : _IGNORE_COLUMN, 'val' : "" },
             # engine
             { 'fmt' : "ENGINE=%s", 'col' : _TABLE_ENGINE, 'val' : "" },
             # auto increment
@@ -768,9 +802,9 @@ class SQLTransformer(object):
         from mysql.utilities.common.table import Table
 
         # Get the Table instances
-        self.dest_tbl = Table(self.destination_db.source, "`%s`.`%s`" %
+        self.dest_tbl = Table(self.destination_db.source, "%s.%s" %
                               (dest_db, dest_name))
-        self.src_tbl = Table(self.source_db.source, "`%s`.`%s`" %
+        self.src_tbl = Table(self.source_db.source, "%s.%s" %
                              (src_db, src_name))
         
         drop_constraints = []
@@ -886,9 +920,9 @@ class SQLTransformer(object):
         from mysql.utilities.common.table import Table
 
         # Get the Table instances
-        self.dest_tbl = Table(self.destination_db.source, "`%s`.`%s`" %
+        self.dest_tbl = Table(self.destination_db.source, "%s.%s" %
                              (dest_db, dest_name))
-        self.src_tbl = Table(self.source_db.source, "`%s`.`%s`" %
+        self.src_tbl = Table(self.source_db.source, "%s.%s" %
                              (src_db, src_name))
         
         drop_indexes = []
@@ -971,7 +1005,7 @@ class SQLTransformer(object):
             # preamble
             { 'fmt' : "%s", 'col' : _IGNORE_COLUMN, 'val' : "ALTER TABLE" },
             # object name
-            { 'fmt' : " `%s`.`%s`", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " %s.%s", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_TABLE_DEF][_TABLE_DB],
                        self.destination[_TABLE_DEF][_TABLE_NAME]) },
             # alter clauses - will be completed later
@@ -1068,7 +1102,7 @@ class SQLTransformer(object):
             # security
             { 'fmt' : " SQL SECURITY %s", 'col' : _VIEW_SECURITY, 'val' : "" },
             # object type and name
-            { 'fmt' : " VIEW `%s`.`%s`", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " VIEW %s.%s", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_VIEW_DB],
                        self.destination[_VIEW_NAME]) },
             # definition
@@ -1125,7 +1159,7 @@ class SQLTransformer(object):
             # definer
             { 'fmt' : " DEFINER=%s", 'col' : _TRIGGER_DEFINER, 'val' : "" },
             # object name
-            { 'fmt' : " TRIGGER `%s`.`%s`", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " TRIGGER %s.%s", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_TRIGGER_DB],
                        self.destination[_TRIGGER_NAME]) },
             # trigger timing
@@ -1181,7 +1215,7 @@ class SQLTransformer(object):
             # definer
             { 'fmt' : " DEFINER=%s", 'col' : _ROUTINE_DEFINER, 'val' : "" },
             # object type and name
-            { 'fmt' : " %s `%s`.`%s`", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " %s %s.%s", 'col' : _IGNORE_COLUMN,
               'val' : (self.obj_type.upper(), self.destination[_ROUTINE_DB],
                        self.destination[_ROUTINE_NAME]) },
             # parameters
@@ -1263,7 +1297,7 @@ class SQLTransformer(object):
             # type
             { 'fmt' : " %s", 'col' : _IGNORE_COLUMN, 'val' : "EVENT" },
             # object name
-            { 'fmt' : " `%s`.`%s`", 'col' : _IGNORE_COLUMN,
+            { 'fmt' : " %s.%s", 'col' : _IGNORE_COLUMN,
               'val' : (self.destination[_EVENT_DB],
                        self.destination[_EVENT_NAME]) },
             # schedule - will be filled in later

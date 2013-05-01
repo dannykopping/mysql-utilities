@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2010, 2012 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,8 +20,10 @@ This module contains an abstraction of a topolgy map object used to discover
 slaves and down-stream replicants for mapping topologies.
 """
 
-import os
+from mysql.utilities.common.options import parse_user_password
 from mysql.utilities.exception import UtilError
+
+_START_PORT = 3306
 
 class TopologyMap(object):
     """The TopologyMap class can be used to connect to a running MySQL server
@@ -64,6 +66,7 @@ class TopologyMap(object):
         self.socket_path = options.get("socket_path", None)
         self.seed_server = seed_server
         self.topology = []
+        self.options = options
 
 
     def _connect(self, conn):
@@ -177,17 +180,25 @@ class TopologyMap(object):
         if not self.quiet:
             print "# Finding slaves for master: %s" % master_info
     
+        # See if the user wants us to discover slaves.
+        discover = self.options.get("discover", None)
+        if discover is None:
+            return
+        
+        # Get user and password (supports login-paths)
+        user, password = parse_user_password(discover, options=self.options)
+
         # Get replication topology
-        slaves = master.get_slaves()
+        slaves = master.get_slaves(user, password)
         slave_list = []
         depth = 0
         if len(slaves) > 0:
             for slave in slaves:
                 if slave.find(":") > 0:
-                    host, port = slave.split(":")
+                    host, port = slave.split(":", 1)
                 else:
                     host = slave
-                    port = START_PORT  # Use the default
+                    port = _START_PORT  # Use the default
                 slave_conn = self.seed_server.copy()
                 slave_conn['host'] = host
                 slave_conn['port'] = port

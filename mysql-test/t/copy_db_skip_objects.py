@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import copy_db
 from mysql.utilities.exception import MUTLibError
@@ -24,7 +38,7 @@ class test(copy_db.test):
         from_conn = "--source=" + self.build_connection_string(self.server1)
         to_conn = "--destination=" + self.build_connection_string(self.server2)
 
-        cmd_str = "mysqldbcopy.py %s %s util_test:util_db_clone" % \
+        cmd_str = "mysqldbcopy.py --skip-gtid %s %s util_test:util_db_clone" % \
                   (from_conn, to_conn)
         
         # In this test, we execute a series of commands saving the results
@@ -115,6 +129,14 @@ class test(copy_db.test):
         # Mask socket for destination server
         self.replace_result("# Destination: root@localhost:",
                             "# Destination: root@localhost:[] ... connected\n")
+        self.replace_result("ERROR: Cannot operate on VIEW object. Error: "
+                            "Query failed. 1146",
+                            "ERROR: Cannot operate on VIEW object. Error: "
+                            "Query failed. 1146: [...]\n")
+        
+
+        # Ignore GTID messages (skipping GTIDs in this test)
+        self.remove_result("# WARNING: The server supports GTIDs")
 
         return True
   

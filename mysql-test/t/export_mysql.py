@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 from mysql.utilities.exception import MUTLibError
@@ -12,6 +26,9 @@ class test(mutlib.System_test):
     """
 
     def check_prerequisites(self):
+        # Check MySQL server version - Must be 5.1.0 or higher
+        if not self.servers.get_server(0).check_version_compat(5, 1, 0):
+            raise MUTLibError("Test requires server version 5.1.0 or higher")
         self.check_gtid_unsafe()
         # Need at least one server.
         self.server1 = None
@@ -79,7 +96,7 @@ class test(mutlib.System_test):
         if conn_val[4] is not None:
             self.server2_conn += "--socket=%s " % conn_val[4]
 
-        cmd = "mysqldbexport.py %s util_test  " % from_conn
+        cmd = "mysqldbexport.py %s util_test --skip-gtid " % from_conn
 
         comment = "Test case 1 - export metadata to new server via the " \
                   "mysql monitor"

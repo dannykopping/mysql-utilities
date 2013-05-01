@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,13 +20,29 @@ This file contains the export operations that will export object metadata or
 table data.
 """
 
-import os
 import re
 import sys
 from mysql.utilities.exception import UtilError, UtilDBError
+from mysql.utilities.common.sql_transform import quote_with_backticks
+from mysql.utilities.common.sql_transform import remove_backtick_quoting
 
 _RPL_COMMANDS, _RPL_FILE = 0, 1
 _RPL_PREFIX = "-- "
+_SESSION_BINLOG_OFF1 = "SET @MYSQLUTILS_TEMP_LOG_BIN = @@SESSION.SQL_LOG_BIN;"
+_SESSION_BINLOG_OFF2 = "SET @@SESSION.SQL_LOG_BIN = 0;"
+_SESSION_BINLOG_ON = "SET @@SESSION.SQL_LOG_BIN = @MYSQLUTILS_TEMP_LOG_BIN;"
+_GET_GTID_EXECUTED = "SELECT @@GLOBAL.GTID_EXECUTED"
+_SET_GTID_PURGED = "SET @@GLOBAL.GTID_PURGED = '%s';"
+_GTID_WARNING = "# WARNING: The server supports GTIDs but you have " + \
+    "elected to skip generating the GTID_EXECUTED statement. Please refer " + \
+    "to the MySQL online reference manual for more information about how " + \
+    "to handle GTID enabled servers with backup and restore operations."
+_GTID_BACKUP_WARNING = "# WARNING: A partial export from a server that has " + \
+    "GTIDs enabled will by default include the GTIDs of all transactions, " + \
+    "even those that changed suppressed parts of the database. If you " + \
+    "don't want to generate the GTID statement, use the --skip-gtid " + \
+    "option. To export all databases, use the --all and --export=both " + \
+    "options."
 
 def export_metadata(source, src_val, db_list, options):
     """Produce rows to be used to recreate objects in a database.
@@ -103,27 +118,30 @@ def export_metadata(source, src_val, db_list, options):
         # Perform the extraction
         if format == "sql":
             db.init()
+            # quote database name with backticks
+            q_db_name = quote_with_backticks(db_name)
             if not skip_create:
-                print "DROP DATABASE IF EXISTS %s;" % db_name
-                print "CREATE DATABASE %s;" % db_name
-            print "USE %s;" % db_name
+                print "DROP DATABASE IF EXISTS %s;" % q_db_name
+                print "CREATE DATABASE %s;" % q_db_name
+            print "USE %s;" % q_db_name
             for dbobj in db.get_next_object():
                 if dbobj[0] == "GRANT" and not skip_grants:
                     if not quiet:
                         print "# Grant:"
                     if dbobj[1][3]:
-                        create_str = "GRANT %s ON `%s`.`%s` TO %s" % \
-                                     (dbobj[1][1], db_name,
-                                      dbobj[1][3], dbobj[1][0])
+                        create_str = "GRANT %s ON %s.%s TO %s;" % \
+                                     (dbobj[1][1], q_db_name,
+                                      quote_with_backticks(dbobj[1][3]), 
+                                      dbobj[1][0])
                     else:
-                        create_str = "GRANT %s ON %s.* TO %s" % \
-                                     (dbobj[1][1], db_name, dbobj[1][0])
+                        create_str = "GRANT %s ON %s.* TO %s;" % \
+                                     (dbobj[1][1], q_db_name, dbobj[1][0])
                     if create_str.find("%"):
                         create_str = re.sub("%", "%%", create_str)
                     print create_str
                 else:
                     if not quiet:
-                        print "# %s: `%s`.`%s`" % (dbobj[0], db_name,
+                        print "# %s: %s.%s" % (dbobj[0], db_name,
                                                dbobj[1][0])
                     if (dbobj[0] == "PROCEDURE" and not skip_procs) or \
                        (dbobj[0] == "FUNCTION" and not skip_funcs) or \
@@ -157,7 +175,10 @@ def export_metadata(source, src_val, db_list, options):
                 objects.append("GRANT")
             for obj_type in objects:
                 sys.stdout.write("# %sS in %s:" % (obj_type, db_name))
-                rows = db.get_db_objects(obj_type, column_type, True)
+                if format in ('grid', 'vertical'):
+                    rows = db.get_db_objects(obj_type, column_type, True)
+                else:
+                    rows = db.get_db_objects(obj_type, column_type, True, True)
                 if len(rows[1]) < 1:
                     print " (none found)"
                 else:
@@ -208,8 +229,8 @@ def _export_row(data_rows, cur_table, format, single, skip_blobs, first=False,
     from mysql.utilities.common.format import format_vertical_list
 
     tbl_name = cur_table.tbl_name
-    db_name = cur_table.db_name
-    full_name = "`%s`.`%s`" % (db_name, tbl_name)
+    q_db_name = cur_table.q_db_name
+    full_name = cur_table.q_table
     list_options = {}
     # if outfile is not set, use stdout.
     if outfile is None:
@@ -222,14 +243,14 @@ def _export_row(data_rows, cur_table, format, single, skip_blobs, first=False,
                 data = data_rows[1]
             blob_rows = []
             for row in data:
-                columns = cur_table.get_column_string(row, full_name)
+                columns = cur_table.get_column_string(row, q_db_name)
                 if len(columns[1]) > 0:
                     blob_rows.extend(columns[1])
                 row_str = "INSERT INTO %s VALUES%s;" % (full_name, columns[0])
                 outfile.write(row_str + "\n")
         else:
             # Generate bulk insert statements
-            data_lists = cur_table.make_bulk_insert(data_rows, db_name)
+            data_lists = cur_table.make_bulk_insert(data_rows, q_db_name)
             rows = data_lists[0]
             blob_rows = data_lists[1]
 
@@ -258,13 +279,13 @@ def _export_row(data_rows, cur_table, format, single, skip_blobs, first=False,
         list_options['print_header'] = first
         list_options['separator'] = '\t'
         list_options['quiet'] = not no_headers
-        format_tabular_list(outfile, cur_table.get_col_names(),
+        format_tabular_list(outfile, cur_table.get_col_names(True),
                             data_rows, list_options)
     elif format == "csv":
         list_options['print_header'] = first
         list_options['separator'] = ','
         list_options['quiet'] = not no_headers
-        format_tabular_list(outfile, cur_table.get_col_names(),
+        format_tabular_list(outfile, cur_table.get_col_names(True),
                             data_rows, list_options)
     else:  # default to table format - header is always printed
         format_tabular_list(outfile, cur_table.get_col_names(),
@@ -345,11 +366,14 @@ def export_data(source, src_val, db_list, options):
     old_db = ""
     for table in table_list:
         db_name = table[0]
-        tbl_name = "`%s`.`%s`" % (db_name, table[1])
+        tbl_name = "%s.%s" % (db_name, table[1])
+        # quote database and table name with backticks
+        q_db_name = quote_with_backticks(db_name)
+        q_tbl_name = "%s.%s" % (q_db_name, quote_with_backticks(table[1]))
         if not quiet and old_db != db_name:
             old_db = db_name
             if format == "sql":
-               print "USE %s;" % db_name
+               print "USE %s;" % q_db_name
             print "# Exporting data from %s" % db_name
             if file_per_table:
                 print "# Writing table data to files."
@@ -359,7 +383,7 @@ def export_data(source, src_val, db_list, options):
             'get_cols' : True,
             'quiet'    : quiet
         }
-        cur_table = Table(source, tbl_name, tbl_options)
+        cur_table = Table(source, q_tbl_name, tbl_options)
         if single and format not in ("sql", "grid", "vertical"):
             retrieval_mode = -1
             first = True
@@ -367,7 +391,7 @@ def export_data(source, src_val, db_list, options):
             retrieval_mode = 1
             first = False
 
-        message = "# Data for table %s: " % tbl_name
+        message = "# Data for table %s: " % q_tbl_name
 
         # switch for writing to files
         if file_per_table:
@@ -478,6 +502,29 @@ def get_change_master_command(source, options={}):
     return (rpl_cmds, rpl_file)
 
 
+def get_gtid_commands(master, options):
+    """Get the GTID commands for beginning and ending operations
+        
+    This method returns those commands needed at the start of an export/copy
+    operation (turn off session binlog, setting GTIDs) and those needed at
+    the end of an export/copy operation (turn on binlog sesson).
+    
+    master[in]         Master connection information
+    
+    Returns tuple - ([],"") = list of commands for start, command for end or
+                              None if GTIDs are not enabled.
+    """
+    if not master.supports_gtid() == "ON":
+        return None
+    rows = master.exec_query(_GET_GTID_EXECUTED)
+    master_gtids_list = ["%s" % row[0] for row in rows]
+    master_gtids = ",".join(master_gtids_list)
+    if len(master_gtids_list) == 1 and rows[0][0] == '':
+        return None
+    return ([_SESSION_BINLOG_OFF1, _SESSION_BINLOG_OFF2,
+             _SET_GTID_PURGED % master_gtids], _SESSION_BINLOG_ON)
+    
+
 def write_commands(file, rows, options):
     """Write commands to file or stdout
     
@@ -517,7 +564,7 @@ def write_commands(file, rows, options):
             rpl_file.write("{0}\n".format(row))
         else:
             if format != 'sql':
-                prefix_str += _RPL_PREFIX
+                prefix_str = _RPL_PREFIX
             rpl_file.write("{0}{1}\n".format(prefix_str, row))
         
     if not quiet:
@@ -551,7 +598,8 @@ def export_databases(server_values, db_list, options):
     quiet = options.get("quiet", False)
     verbosity = options.get("verbosity", 0)
     locking = options.get("locking", "snapshot")
-    
+    skip_gtids = options.get("skip_gtid", False) # default is to generate GTIDs
+        
     conn_options = {
         'quiet'     : quiet,
         'version'   : "5.1.30",
@@ -559,13 +607,46 @@ def export_databases(server_values, db_list, options):
     servers = connect_servers(server_values, None, conn_options)
     source = servers[0]
     
+    # Check for GTID support
+    supports_gtid = servers[0].supports_gtid()
+    if not skip_gtids and not supports_gtid == 'ON':
+        skip_gtids = True
+    elif skip_gtids and supports_gtid == 'ON':
+        print _GTID_WARNING
+        
+    if not skip_gtids and supports_gtid == 'ON':
+        # Check GTID version for complete feature support
+        servers[0].check_gtid_version()
+        warning_printed = False
+        # Check to see if this is a full export (complete backup)
+        all_dbs = servers[0].exec_query("SHOW DATABASES")
+        for db in all_dbs:
+            if warning_printed:
+                continue
+            if db[0].upper() in ["MYSQL", "INFORMATION_SCHEMA",
+                                 "PERFORMANCE_SCHEMA"]:
+                continue
+            if not db[0] in db_list:
+                print _GTID_BACKUP_WARNING
+                warning_printed = True
+    
     # Lock tables first
     my_lock = get_copy_lock(source, db_list, options, True)
 
     # if --rpl specified, write initial replication command
+    rpl_info = None
     if rpl_mode:
         rpl_info = get_change_master_command(source, options)
         write_commands(rpl_info[_RPL_FILE], ["STOP SLAVE;"], options)
+
+    # if GTIDs enabled and user requested the output, write the GTID commands
+    if skip_gtids:
+        gtid_info = None
+    else:
+        gtid_info = get_gtid_commands(source, options)
+
+    if gtid_info:
+        write_commands(sys.stdout, gtid_info[0], options)
         
     # dump metadata
     if export in ("definitions", "both"):
@@ -577,6 +658,9 @@ def export_databases(server_values, db_list, options):
             print "# NOTE : --display is ignored for data export."
         export_data(source, server_values, db_list, options)
         
+    # if GTIDs enabled, write the GTID-related commands
+    if gtid_info:
+        write_commands(sys.stdout, [gtid_info[1]], options)
     # if --rpl specified, write replication end command
     if rpl_mode:
         write_commands(rpl_info[_RPL_FILE], rpl_info[_RPL_COMMANDS],

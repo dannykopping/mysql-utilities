@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
 #
@@ -98,18 +97,20 @@ def clone_server(conn_val, options):
         if not quiet:
             print "# Cloning the MySQL server located at %s." % basedir
 
-    # If datadir exists, delete it
-    if os.path.exists(new_data):
+    # If datadir exists, has data, and user said it was Ok, delete it
+    if os.path.exists(new_data) and options.get("delete", False) and \
+       os.listdir(new_data):
         shutil.rmtree(new_data, True)
 
     # Create new data directory if it does not exist
-    if not quiet:
-        print "# Creating new data directory..."
     if not os.path.exists(new_data):
+        if not quiet:
+            print "# Creating new data directory..."
         try:
             res = os.mkdir(new_data)
         except:
             raise UtilError("Unable to create directory '%s'" % new_data)
+        
 
     if not quiet:
         print "# Configuring new instance..."
@@ -175,6 +176,20 @@ def clone_server(conn_val, options):
 
     # Wait for subprocess to finish
     res = proc.wait()
+      
+    # Kill subprocess just in case it didn't finish - Ok if proc doesn't exist
+    if int(res) != 0:
+        if os.name == "posix":
+            try:
+                os.kill(proc.pid, subprocess.signal.SIGTERM)
+            except OSError:
+                pass
+        else:
+            try:
+                retval = subprocess.Popen("taskkill /F /T /PID %i" % proc.pid,
+                                          shell=True)
+            except:
+                pass
 
     # Drop the bootstrap file
     if os.path.isfile("bootstrap.sql"):

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013 Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,6 +26,9 @@ METHODS
 
 import csv
 import os
+
+_MAX_WIDTH = 78
+_TWO_COLUMN_DISPLAY = "{0:{1}}  {2:{3}}"
 
 def _format_col_separator(file, columns, col_widths, quiet=False):
     """Format a row of the header with column separators
@@ -105,10 +108,16 @@ def format_tabular_list(file, columns, rows, options={}):
 
         stop = len(columns)
         for row in rows:
-            for i in range(0, stop):
-                col_size = len("%s" % row[i]) + 1
-                if col_size > col_widths[i]:
-                    col_widths[i] = col_size
+            # if there is one column, just use row.
+            if stop == 1:
+                col_size = len(row[0]) + 1
+                if col_size > col_widths[0]:
+                    col_widths[0] = col_size
+            else:
+                for i in range(0, stop):
+                    col_size = len("%s" % row[i]) + 1
+                    if col_size > col_widths[i]:
+                        col_widths[i] = col_size
 
         # print header
         if print_header:
@@ -186,3 +195,89 @@ def print_list(file, format, columns, rows, no_headers=False, sort=False):
     else:  # default to table format
         format_tabular_list(file, columns, rows, list_options)
 
+
+def _get_max_key_dict_list(dictionary_list, key, alias_key=None):
+    """Get maximum key length for display calculation
+    
+    dictionary_list[in]   Dictionary to print
+    key[in]               Name of the key
+    use_alias[in]         If not None, add alias to width too
+    
+    Returns int - max width of key
+    """
+    lcal = lambda x: len(str(x or ''))
+    dl = dictionary_list
+    tmp = [ (lcal(item[key]), lcal(item.get(alias_key, 0))) for item in dl ]
+    return max([ (x[0]+x[1]+3) if x[1] else x[0] for x in tmp])
+
+
+def print_dictionary_list(column_names, keys, dictionary_list,
+                          max_width=_MAX_WIDTH, use_alias=True,
+                          show_header=True):
+    """Print a multiple-column list with text wrapping
+    
+    column_names[in]       Column headings
+    keys[in]               Keys for dictionary items
+    dictionary_list[in]    Dictionary to print (list of)
+    max_width[in]          Max width
+    use_alias[in]          If True, use keys[2] to print an alias
+    
+
+    """
+    import textwrap
+    
+    max_name = _get_max_key_dict_list(dictionary_list, keys[0])
+    if max_name < len(column_names[0]):
+        max_name = len(column_names[0])
+    max_value = (max_width - 2 - max_name) or 25
+    if show_header:
+        print(_TWO_COLUMN_DISPLAY.format(column_names[0], max_name,
+                                         column_names[1], max_value))
+        print(_TWO_COLUMN_DISPLAY.format('-'*(max_name), max_name,
+                                         '-'*max_value, max_value))
+    for item in dictionary_list:
+        name = item[keys[0]]
+        value = item[keys[1]]
+        if isinstance(value, (bool, int)) or value is None:
+            description = [str(value)]
+        elif not value:
+            description = ['']
+        else:
+            description = textwrap.wrap(value, max_value)
+        
+        if use_alias and len(keys) > 2 and len(item[keys[2]]) > 0:
+            name += ' | ' + item[keys[2]]
+        print(_TWO_COLUMN_DISPLAY.format(name, max_name,
+                                         description[0], max_value))
+        for i in range(1, len(description)):
+            print(_TWO_COLUMN_DISPLAY.format('', max_name, description[i],
+                                             max_value))
+
+
+def convert_dictionary_list(dict_list):
+    """Convert a dictionary to separated lists of keys and values.
+
+    Convert the list of items of the given dictionary (i.e. pairs key, value)
+    to a set of columns containing the keys and a set of rows containing the
+    values.
+
+    dict_list[in]    Dictionary with a list of items to convert
+
+    Returns tuple - (columns, rows)
+    """
+    cols = []
+    rows = []
+    # First, get a list of the columns
+    for node in dict_list:
+        for key in node.keys():
+            if key not in cols:
+                cols.append(key)
+
+    # Now form the rows replacing missing columns with None
+    for node in dict_list:
+        row = []
+        for col in cols:
+            row.append(node.get(col, None))
+        rows.append(row)
+
+    return (cols, rows)

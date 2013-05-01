@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 import rpl_admin
@@ -31,7 +45,7 @@ class test(rpl_admin.test):
     def run(self):
         self.res_fname = "result.txt"
         
-        base_cmd = "mysqlrpladmin.py --ping=5 --timeout=7 " + \
+        base_cmd = "mysqlrpladmin.py --ping=5 --timeout=7 --rpl-user=rpl:rpl " + \
                    "--seconds-behind=30 --max-position=100 "
 
         master_conn = self.build_connection_string(self.server1).strip(' ')
@@ -57,6 +71,9 @@ class test(rpl_admin.test):
         if not res:
             raise MUTLibError("%s: failed" % comment)            
         
+        self.server2.exec_query("GRANT REPLICATION SLAVE ON *.* TO "
+                                "'rpl'@'localhost' IDENTIFIED BY 'rpl'")
+        
         comment = "Test case 3 - switchover with verbosity"
         cmd_str = "%s %s " % (base_cmd, master_str)
         cmd_opts = " --discover-slaves-login=root:root --verbose switchover "
@@ -78,8 +95,11 @@ class test(rpl_admin.test):
             
         # Now check the log and dump its entries
         log_file = open(_LOGNAME, "r")
-        self.results.append("A switchover writes %s entries in the log.\n" %
-                            len(log_file.readlines()))
+        num_log_lines = len(log_file.readlines())
+        if num_log_lines > 0:
+            self.results.append("Switchover has written to the log.\n")
+        else:
+            self.results.append("ERROR! Nothing written to the log.\n")
         log_file.close()
             
         # Now overwrite the log file and populate with known 'old' entries
@@ -101,8 +121,10 @@ class test(rpl_admin.test):
         
         # Now check the log and dump its entries
         log_file = open(_LOGNAME, "r")
-        self.results.append("There are (after) %s entries in the log.\n" %
-                            len(log_file.readlines()))
+        if len(log_file.readlines()) > num_log_lines:
+            self.results.append("There are additional entries in the log.\n")
+        else:
+            self.results.append("ERROR: Nothing else written to the log.\n")
         log_file.close()
         try:
             os.unlink(_LOGNAME)

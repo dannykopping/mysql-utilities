@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2010, 2012 Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,12 +23,13 @@ server operations used in multiple utilities.
 
 import os
 import re
-import sys
 import mysql.connector
-from mysql.utilities.exception import UtilError, UtilDBError
+from mysql.utilities.exception import UtilError, UtilDBError, UtilRplError
 from mysql.utilities.common.options import parse_connection
 
 _FOREIGN_KEY_SET = "SET foreign_key_checks = %s"
+_GTID_ERROR = ("The server %s:%s does not comply to the latest GTID " 
+               "feature support. Errors:")
 
 def get_connection_dictionary(conn_info):
     """Get the connection dictionary.
@@ -37,7 +38,8 @@ def get_connection_dictionary(conn_info):
     
         - dictionary containing connection information including:
           (user, passwd, host, port, socket)
-        - connection string in the form: user:pass@host:port:socket
+        - connection string in the form: user:pass@host:port:socket or 
+                                         login-path:port:socket
         - an instance of the Server class
         
     conn_info[in]          Connection information
@@ -54,7 +56,7 @@ def get_connection_dictionary(conn_info):
         conn_val = conn_info.get_connection_values()
     elif isinstance(conn_info, basestring):
         # parse the string
-        conn_val = parse_connection(conn_info)
+        conn_val = parse_connection(conn_info, None)
     else:
         raise UtilError("Cannot determine connection information type.")
 
@@ -68,7 +70,8 @@ def _print_connection(prefix, conn_info):
     
         - dictionary containing connection information including:
           (user, passwd, host, port, socket)
-        - connection string in the form: user:pass@host:port:socket
+        - connection string in the form: user:pass@host:port:socket or
+                                         login-path:port:socket
         - an instance of the Server class
         
     conn_info[in]          Connection information
@@ -268,7 +271,8 @@ def connect_servers(src_val, dest_val, options={}):
     
         - dictionary containing connection information including:
           (user, passwd, host, port, socket)
-        - connection string in the form: user:pass@host:port:socket
+        - connection string in the form: user:pass@host:port:socket or
+                                         login-path:port:socket
         - an instance of the Server class
 
     src_val[in]        source connection information
@@ -330,7 +334,7 @@ def connect_servers(src_val, dest_val, options={}):
     if not _require_version(source, version):
         raise UtilError("The %s version is incompatible. Utility "
                         "requires version %s or higher." %
-                        (source.name, version))
+                        (src_name, version))
 
     # If not cloning, connect to the destination server and check version
     if not cloning:
@@ -343,7 +347,7 @@ def connect_servers(src_val, dest_val, options={}):
         if not _require_version(destination, version):
             raise UtilError("The %s version is incompatible. Utility "
                             "requires version %s or higher." %
-                            (destination.name, version))
+                            (dest_name, version))
     elif not quiet and dest_dict is not None and \
          not isinstance(dest_val, Server):
         _print_connection(dest_name, src_dict)
@@ -351,22 +355,29 @@ def connect_servers(src_val, dest_val, options={}):
     return (source, destination)
 
 
-def test_connect(conn_info):
+def test_connect(conn_info, throw_errors=False):
     """Test connection to a server.
     
     The method accepts one of the following types for conn_info:
     
         - dictionary containing connection information including:
           (user, passwd, host, port, socket)
-        - connection string in the form: user:pass@host:port:socket
+        - connection string in the form: user:pass@host:port:socket or
+                                         login-path:port:socket
         - an instance of the Server class
         
     conn_info[in]          Connection information
-
+    
+    throw_errors           throw any errors found during the test,
+                           false by default.
+    
     Returns True if connection success, False if error
     """
     # Parse source connection values
-    src_val = get_connection_dictionary(conn_info)
+    try:
+        src_val = get_connection_dictionary(conn_info)
+    except Exception as err:
+        raise UtilError("Server connection values invalid: %s." % err.errmsg)
     try:
         conn_options = {
             'quiet'     : True,
@@ -375,9 +386,26 @@ def test_connect(conn_info):
         }
         s = connect_servers(src_val, None, conn_options)
         s[0].disconnect()
-    except UtilError, e:
+    except UtilError:
+        if throw_errors:
+            raise
         return False
     return True
+
+
+def check_hostname_alias(server1_vals, server2_vals):
+    """Check to see if the servers are the same machine by host name.
+    
+    server1_vals[in]   connection dictionary for server1
+    server2_vals[in]   connection dictionary for server2
+    
+    Returns bool - true = server1 and server2 are the same host
+    """
+    server1 = Server({'conn_info' : server1_vals})
+    server2 = Server({'conn_info' : server2_vals})
+
+    return (server1.is_alias(server2.host) and
+            int(server1.port) == int(server2.port))
 
 
 class Server(object):
@@ -401,7 +429,8 @@ class Server(object):
         
             - dictionary containing connection information including:
               (user, passwd, host, port, socket)
-            - connection string in the form: user:pass@host:port:socket
+            - connection string in the form: user:pass@host:port:socket or
+                                             login-path:port:socket
             - an instance of the Server class
              
         options[in]        options for controlling behavior:
@@ -413,11 +442,11 @@ class Server(object):
             charset        Default character set for the connection.
                            (default latin1)
         """
-        
         assert not options.get("conn_info") == None
         
         self.verbose = options.get("verbose", False)
         self.db_conn = None
+        self.host = None
         self.charset = options.get("charset", "latin1")
         self.role = options.get("role", "Server")
         conn_values = get_connection_dictionary(options.get("conn_info"))
@@ -438,8 +467,10 @@ class Server(object):
         # foreign_key_checks_enabled.
         self.fkeys = None
         self.read_only = False
+        self.aliases = []
+        self.is_alias("")
         
-    
+
     def is_alive(self):
         """Determine if connection to server is still alive.
         
@@ -455,10 +486,88 @@ class Server(object):
                 retval = self.db_conn.is_connected()
                 if retval:
                     self.exec_query("SHOW DATABASES")
+                else:
+                    res = False
         except:
             res = False
         return res
 
+
+    def is_alias(self, host_or_ip):
+        """Determine if host_or_ip is an alias for this host
+        
+        host_or_ip[in] host or IP number to check
+        
+        Returns bool - True = host_or_ip is an alias
+        """
+        from mysql.utilities.common.options import hostname_is_ip
+        import socket
+        
+        if self.aliases:
+            return host_or_ip.lower() in self.aliases
+
+        # First, get the local information
+        try:
+            local_info = socket.gethostbyname_ex(socket.gethostname())
+            local_aliases = [local_info[0].lower()]
+            # if dotted host name, take first part and use as an alias
+            try:
+                local_aliases.append(local_info[0].split('.')[0])
+            except:
+                pass
+            local_aliases.extend(['127.0.0.1', 'localhost'])
+            local_aliases.extend(local_info[1])
+            local_aliases.extend(local_info[2])
+        except (socket.herror, socket.gaierror):
+            local_aliases = []
+        
+        # Check for local
+        if self.host in local_aliases:
+            self.aliases.extend(local_aliases)
+        else:
+            self.aliases.append(self.host)
+            if hostname_is_ip(self.host): # IP address
+                try:
+                    my_host = socket.gethostbyaddr(self.host)
+                    self.aliases.append(my_host[0])
+                    host_ip = socket.gethostbyname_ex(my_host[0])
+                except Exception, e:
+                    host_ip = ([],[],[])
+                    if self.verbose:
+                        print "WARNING: IP lookup failed", e
+            else:
+                try:
+                    host_ip = socket.gethostbyname_ex(self.host)
+                    self.aliases.append(host_ip[0])
+                except Exception, e:
+                    host_ip = ([],[],[])
+                    if self.verbose:
+                        print "WARNING: Hostname lookup failed", e
+
+            self.aliases.extend(host_ip[1])
+            self.aliases.extend(host_ip[2])
+
+        return host_or_ip.lower() in self.aliases
+
+
+    def user_host_exists(self, user, host_or_ip):
+        """Check to see if a user, host exists
+        
+        This method attempts to see if a user name matches the users on the
+        server and that any user, host pair can match the host or IP address
+        specified. This attempts to resolve wildcard matches.
+        
+        user[in]       user name
+        host_or_ip[in] host or IP address
+        
+        Returns string - host from server that matches the host_or_ip or
+                         None if no match.
+        """
+        res = self.exec_query("SELECT host FROM mysql.user WHERE user = '%s' AND '%s' LIKE host " % (user, host_or_ip))
+        if res:
+            return res[0][0]
+        return None
+        
 
     def get_connection_values(self):
         """Return a dictionary of connection values for the server.
@@ -503,8 +612,12 @@ class Server(object):
             parameters['charset'] = self.charset
             self.db_conn = mysql.connector.connect(**parameters)
         except mysql.connector.Error, e:
-            raise e
-            return False
+            # Reset any previous value if the connection cannot be established,
+            # before raising an exception. This prevents the use of a broken
+            # database connection.
+            self.db_conn = None
+            raise UtilError("Cannot connect to the %s server.\n"
+                            "Error %s" % (self.role, e.msg), e.errno)
         self.connect_error = None
         self.read_only = self.show_server_variable("READ_ONLY")[0][1]
         
@@ -548,22 +661,13 @@ class Server(object):
         """
         version_str = self.get_version()
         if version_str is not None:
-            index = version_str.find("-")
-            if index >= 0:
-                parts = version_str[0:index].split(".")
+            match = re.match(r'^(\d+\.\d+(\.\d+)*).*$', version_str.strip())
+            if match:
+                version = [int(x) for x in match.group(1).split('.')]
+                version = (version + [0])[:3]  # Ensure a 3 elements list
+                return version >= [int(t_major), int(t_minor), int(t_rel)]
             else:
-                parts = version_str.split(".")
-            major = parts[0]
-            minor = parts[1]
-            rel = parts[2]
-            if int(t_major) > int(major):
                 return False
-            elif int(t_major) == int(major):
-                if int(t_minor) > int(minor):
-                    return False
-                elif int(t_minor) == int(minor):
-                    if int(t_rel) > int(rel):
-                        return False
         return True
 
 
@@ -606,7 +710,7 @@ class Server(object):
                 cur = self.db_conn.cursor(
                     cursor_class=mysql.connector.cursor.MySQLCursorBufferedRaw)
             else:
-                cur = self.db_conn.cursor(buffered)
+                cur = self.db_conn.cursor(buffered=True)
         else:
             cur = self.db_conn.cursor(raw=True)
 
@@ -680,8 +784,52 @@ class Server(object):
             res = self.exec_query("SELECT @@GLOBAL.GTID_MODE")
         except:
             return "NO"
-        
+
         return res[0][0]
+        
+        
+    def check_gtid_version(self):
+        """Determine if server supports latest GTID changes
+        
+        This method checks the server to ensure it contains the latest
+        changes to the GTID variables (from version 5.6.9).
+        
+        Raises UtilRplError when errors occur.
+        """
+        errors = []
+        if not self.supports_gtid() == "ON":
+            errors.append("    GTID is not enabled.")
+        if not self.check_version_compat(5, 6, 9):
+            errors.append("    Server version must be 5.6.9 or greater.")
+        res = self.exec_query("SHOW VARIABLES LIKE 'gtid_executed'")
+        if res == [] or not res[0][0] == "gtid_executed":
+            errors.append("    Missing gtid_executed system variable.")
+        if errors:
+            errors = "\n".join(errors)
+            errors = "\n".join([_GTID_ERROR % (self.host, self.port), errors])
+            raise UtilRplError(errors)
+            
+            
+    def check_gtid_executed(self, operation="copy"):
+        """Check to see if the gtid_executed variable is clear
+        
+        If the value is not clear, raise an error with appropriate instructions
+        for the user to correct the issue.
+        
+        operation[in]  Name of the operation (copy, import, etc.)
+                       default = copy
+        """
+        res = self.exec_query("SHOW GLOBAL VARIABLES LIKE 'gtid_executed'")[0]
+        if res[1].strip() == '':
+            return
+        err = ("The {0} operation contains GTID statements "
+               "that require the global gtid_executed system variable on the "
+               "target to be empty (no value). The gtid_executed value must "
+               "be reset by issuing a RESET MASTER command on the target "
+               "prior to attempting the {0} operation. "
+               "Once the global gtid_executed value is cleared, you may "
+               "retry the {0}.").format(operation)
+        raise UtilRplError(err)
 
 
     def get_gtid_status(self):
@@ -701,8 +849,8 @@ class Server(object):
         if res[0][0].upper() == 'OFF':
             raise UtilError("Global Transaction IDs are not enabled.")
 
-        gtid_data = [self.exec_query("SELECT @@GLOBAL.GTID_DONE")[0],
-                     self.exec_query("SELECT @@GLOBAL.GTID_LOST")[0],
+        gtid_data = [self.exec_query("SELECT @@GLOBAL.GTID_EXECUTED")[0],
+                     self.exec_query("SELECT @@GLOBAL.GTID_PURGED")[0],
                      self.exec_query("SELECT @@GLOBAL.GTID_OWNED")[0]]
             
         return gtid_data
@@ -720,13 +868,14 @@ class Server(object):
         from mysql.utilities.common.user import User
         
         errors = []
-        result = self.exec_query("SELECT * FROM mysql.user WHERE user = '%s' "
-                                 "AND host = '%s'" % (user, host))
+        if host == '127.0.0.1':
+            host = 'localhost'
+        result = self.user_host_exists(user, host)
         if result is None or result == []:
             errors.append("The replication user %s@%s was not found "
-                          "on the master." % (user, host))
+                          "on %s:%s." % (user, host, self.host, self.port))
         else:
-            rpl_user = User(self, "%s@%s" % (user, host))
+            rpl_user = User(self, "%s@" % user + result)
             if not rpl_user.has_privilege('*', '*',
                                           'REPLICATION SLAVE'):
                 errors.append("Replication user does not have the "
@@ -735,6 +884,27 @@ class Server(object):
                               "databases.")
 
         return errors
+
+    def supports_plugin(self, plugin):
+        """Check if the given plugin is supported.
+
+        Check to see if the server supports a plugin. Return True if
+        plugin installed and active.
+
+        plugin[in]     Name of plugin to check
+
+        Returns True if plugin is supported, and False otherwise.
+        """
+        _PLUGIN_QUERY = ("SELECT * FROM INFORMATION_SCHEMA.PLUGINS "
+                         "WHERE PLUGIN_NAME ")
+        res = self.exec_query("".join([_PLUGIN_QUERY, "LIKE ",
+                                        "'%s" % plugin, "%'"]))
+        if not res:
+            return False
+        # Now see if it is active.
+        elif res[0][2] != 'ACTIVE':
+            return False
+        return True
 
     
     def get_all_databases(self):
@@ -1064,6 +1234,22 @@ class Server(object):
                                "%s." % self.role)
         
         return int(res[0][1])
+
+
+    def get_server_uuid(self):
+        """Retrieve the server uuid.
+        
+        Returns string - server uuid.
+        """
+        try:
+            res = self.show_server_variable("server_uuid")
+            if res is None or res == []:
+                return None
+        except:
+            raise UtilRplError("Cannot retrieve server_uuid from "
+                               "%s." % self.role)
+        
+        return res[0][1]
 
 
     def get_lctn(self):

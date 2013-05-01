@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 import rpl_admin_gtid
@@ -25,28 +39,38 @@ class test(rpl_admin_gtid.test):
         return True
 
     def check_prerequisites(self):
-        if self.servers.get_server(0).supports_gtid() != "ON":
-            raise MUTLibError("Test requires server version 5.6.5 with "
+        if self.servers.get_server(0).supports_gtid() != "ON" or \
+           not self.servers.get_server(0).check_version_compat(5,6,9):
+            raise MUTLibError("Test requires server version 5.6.9 with "
                               "GTID_MODE=ON.")
+        if os.name == "nt":
+            raise MUTLibError("Test does not run correctly on Windows. "
+                              "See BUG#16005010.")
         if os.name == "posix":
             self.failover_dir = "./fail_event"
         else:
             self.failover_dir = ".\\fail_event"
         if self.debug:
             print
-        for log in ["1","2","3"]:
+        for log in ["1","2","3","4"]:
             try:
-                os.unlink(log+_FAILOVERLOG)
+                os.unlink(log + _FAILOVER_LOG)
             except:
                 pass
         return rpl_admin_gtid.test.check_prerequisites(self)
 
     def setup(self):
+        self.temp_files = []
         return rpl_admin_gtid.test.setup(self)
         
     def start_process(self, cmd):
-        file = os.devnull
-        f_out = open(file, 'w')
+        import tempfile
+        if self.debug:
+            f_out = tempfile.TemporaryFile()
+            self.temp_files.append(f_out)
+        else:
+            file = os.devnull
+            f_out = open(file, 'w')
         if os.name == "posix":
              proc = subprocess.Popen(cmd, shell=True, stdout=f_out, stderr=f_out)
         else:
@@ -75,7 +99,8 @@ class test(rpl_admin_gtid.test):
         else:
             if proc.poll() is None:
                 res = proc.wait()
-        f_out.close()
+        if not self.debug:
+            f_out.close()
         return res
     
     def is_process_alive(self, pid, start, end):
@@ -241,7 +266,7 @@ class test(rpl_admin_gtid.test):
         failover_cmd = "python ../scripts/mysqlfailover.py --interval=10 " + \
                        " --discover-slaves-login=root:root %s --failover-" + \
                        'mode=%s --log=%s --exec-post-fail="mkdir ' + \
-                       self.failover_dir + '" '
+                       self.failover_dir + '" --timeout=5 '
         
         conn_str = " ".join([master_str, slaves_str])
         str = failover_cmd % (conn_str, 'auto', "1"+_FAILOVER_LOG)
@@ -266,7 +291,61 @@ class test(rpl_admin_gtid.test):
             if res is not None:
                 self.test_results.append(res)
             else:
-                raise MUTLibError("%s: failed" % comment)
+                raise MUTLibError("%s: failed" % test_case[4])
+                
+                
+        # Now we must test the --force option. But first, ensure the master
+        # does not have the table.
+        try:
+            self.server4.exec_query("DROP TABLE IF EXISTS mysql.failover_console")
+        except:
+            pass
+        
+        comment = "Test case 4 - test --force on first run"
+        # Note: test should pass without any errors. If the start or stop
+        #       timeout, the test case has failed and the log will contain
+        #       the error.
+        if self.debug:
+            print comment
+
+        failover_cmd = "python ../scripts/mysqlfailover.py --interval=10 " + \
+                       " --discover-slaves-login=root:root --force " + \
+                       "--master=%s --log=%s" % (slave3_conn, "4"+_FAILOVER_LOG)
+        
+        if self.debug:
+            print failover_cmd
+
+        # Launch the console in stealth mode
+        proc, f_out = self.start_process(failover_cmd)
+
+        # Wait for console to load
+        if self.debug:
+            print "# Waiting for console to start."
+        i = 1
+        time.sleep(1)
+        while proc.poll() is not None:
+            time.sleep(1)
+            i += 1
+            if i > _TIMEOUT:
+                if self.debug:
+                    print "# Timeout console to start."
+                raise MUTLibError("%s: failed - timeout waiting for "
+                                  "console to start." % comment)  
+
+        # Need to poll here and wait for console to really end.
+        ret_val = self.stop_process(proc, f_out, True)
+        # Wait for console to end
+        if self.debug:
+            print "# Waiting for console to end."
+        i = 0
+        while proc.poll() is None:
+            time.sleep(1)
+            i += 1
+            if i > _TIMEOUT:
+                if self.debug:
+                    print "# Timeout console to end."
+                raise MUTLibError("%s: failed - timeout waiting for "
+                                  "console to end." % comment)
                 
         return True
 
@@ -286,9 +365,15 @@ class test(rpl_admin_gtid.test):
         return True # Not a comparative test
     
     def cleanup(self):
-        for log in ["1","2","3"]:
+        if self.debug:
+            for file in self.temp_files:
+                file.seek(0)
+                for row in file.readlines():
+                    if len(row.strip()):
+                        print row,
+        for log in ["1","2","3","4"]:
             try:
-                os.unlink(log+_FAILOVERLOG)
+                os.unlink(log + _FAILOVER_LOG)
             except:
                 pass
         return rpl_admin_gtid.test.cleanup(self)

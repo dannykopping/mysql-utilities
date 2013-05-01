@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,17 +23,21 @@ all tables in each database), a list of tables in the for db.table,
 or all tables in all databases except internal databases.
 """
 
-import optparse
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os.path
 import sys
 
-from mysql.utilities import VERSION_FRM
 from mysql.utilities.command import indexcheck
-from mysql.utilities.exception import UtilError
 from mysql.utilities.common.options import parse_connection
 from mysql.utilities.common.options import setup_common_options
-from mysql.utilities.common.options import add_verbosity, check_verbosity
+from mysql.utilities.common.options import add_verbosity
 from mysql.utilities.common.options import add_format_option
+from mysql.utilities.exception import FormatError
+from mysql.utilities.exception import UtilError
 
 # Constants
 DESCRIPTION = "mysqlindexcheck - check for duplicate or redundant indexes"
@@ -91,8 +95,12 @@ if len(args) == 0:
 # Parse source connection values
 try:
     source_values = parse_connection(opt.server)
-except:
-    parser.error("Source connection values invalid or cannot be parsed.")
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Server connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Server connection values invalid: %s." % err.errmsg)
 
 # Check best, worst for validity
 best = None
@@ -125,12 +133,6 @@ if (worst is not None or best is not None) and not opt.stats:
     parser.error("You must specify --stats for --best or --worst to take " \
                  "effect.")
 
-# Parse source connection values
-try:
-    source_values = parse_connection(opt.server)
-except:
-    parser.error("Source connection values invalid or cannot be parsed.")
-    
 # Build dictionary of options
 options = {
     "show-drops"    : opt.show_drops,
@@ -145,8 +147,9 @@ options = {
 
 try:
     res = indexcheck.check_index(source_values, args, options)
-except UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
 
-exit()
+sys.exit()

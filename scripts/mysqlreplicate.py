@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,22 +21,27 @@ This file contains the replicate utility. It is used to establish a
 master/slave replication topology among two servers.
 """
 
-import optparse
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os.path
 import sys
 
-from mysql.utilities.exception import UtilError
+from mysql.utilities.command.setup_rpl import setup_replication
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.common.options import parse_connection, add_rpl_user
-from mysql.utilities.common.options import add_verbosity, check_verbosity
-from mysql.utilities.command.setup_rpl import setup_replication
-from mysql.utilities import VERSION_FRM
+from mysql.utilities.common.options import add_verbosity
+from mysql.utilities.common.server import check_hostname_alias
+from mysql.utilities.exception import FormatError
+from mysql.utilities.exception import UtilError
 
 # Constants
 NAME = "MySQL Utilities - mysqlreplicate "
 DESCRIPTION = "mysqlreplicate - establish replication with a master"
 USAGE = "%prog --master=root@localhost:3306 --slave=root@localhost:3310 " \
-        "--server-id=3 --rpl_user=rpl:passwd "
+        "--rpl-user=rpl:passwd "
 
 # Setup the command parser
 parser = setup_common_options(os.path.basename(sys.argv[0]),
@@ -48,13 +53,15 @@ parser = setup_common_options(os.path.basename(sys.argv[0]),
 parser.add_option("--master", action="store", dest="master",
                   type = "string", default="root@localhost:3306",
                   help="connection information for master server in " + \
-                  "the form: <user>:<password>@<host>:<port>:<socket>")
+                  "the form: <user>[:<password>]@<host>[:<port>][:<socket>] or"
+                  " <login-path>[:<port>][:<socket>].")
 
 # Connection information for the destination server
 parser.add_option("--slave", action="store", dest="slave",
                   type = "string", default=None,
                   help="connection information for slave server in " + \
-                  "the form: <user>:<password>@<host>:<port>:<socket>")
+                  "the form: <user>[:<password>]@<host>[:<port>][:<socket>] or"
+                  " <login-path>[:<port>][:<socket>].")
 
 # Replication user and password
 add_rpl_user(parser)
@@ -94,15 +101,28 @@ opt, args = parser.parse_args()
 
 # Parse source connection values
 try:
-    m_values = parse_connection(opt.master)
-except:
-    parser.error("Master connection values invalid or cannot be parsed.")
+    m_values = parse_connection(opt.master, None, opt)
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Master connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Master connection values invalid: %s." % err.errmsg)
+
 
 # Parse source connection values
 try:
-    s_values = parse_connection(opt.slave)
-except:
-    parser.error("Slave connection values invalid or cannot be parsed.")
+    s_values = parse_connection(opt.slave, None, opt)
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Slave connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Slave connection values invalid: %s." % err.errmsg)
+
+# Check hostname alias
+if check_hostname_alias(m_values, s_values):
+    parser.error("The master and slave are the same host and port.")
     
 # Check required --master-log-file for --master-log-pos
 if (opt.master_log_pos >= 0 and opt.master_log_file is None):
@@ -127,8 +147,9 @@ options = {
 try:
     res = setup_replication(m_values, s_values, opt.rpl_user,
                             options, opt.test_db)
-except UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
 
-exit()
+sys.exit()

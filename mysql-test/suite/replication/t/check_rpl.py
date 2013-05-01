@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import replicate
 import mutlib
@@ -53,6 +67,40 @@ class test(replicate.test):
         if not res:
             raise MUTLibError("%s: failed" % comment)
             
+        self.server1.exec_query("STOP SLAVE")
+        self.server1.exec_query("CHANGE MASTER TO MASTER_HOST='127.0.0.1'")
+        self.server1.exec_query("START SLAVE")
+
+        comment = "Test case 4 - normal run with loopback"
+        res = mutlib.System_test.run_test_case(self, 0, cmd_str, comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+
+        self.server2.exec_query("DROP USER rpl@localhost")
+        self.server2.exec_query("GRANT REPLICATION SLAVE ON *.* TO rpl@'%'"
+                                " IDENTIFIED BY 'rpl'")
+        self.server2.exec_query("FLUSH PRIVILEGES")
+
+        comment = "Test case 5 - normal run with grant for rpl@'%'"
+        res = mutlib.System_test.run_test_case(self, 0, cmd_str, comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+            
+        self.server2.exec_query("DROP USER rpl@'%'")
+        self.server2.exec_query("GRANT REPLICATION SLAVE ON *.* TO rpl@'local%'"
+                                " IDENTIFIED BY 'rpl'")
+        self.server2.exec_query("FLUSH PRIVILEGES")
+
+        comment = "Test case 6 - normal run with grant with wildcard rpl@'local%'"
+        res = mutlib.System_test.run_test_case(self, 0, cmd_str, comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+            
+        self.server2.exec_query("DROP USER rpl@'local%'")
+        self.server2.exec_query("GRANT REPLICATION SLAVE ON *.* TO rpl@localhost"
+                                " IDENTIFIED BY 'rpl'")
+        self.server2.exec_query("FLUSH PRIVILEGES")
+
         self.do_replacements()
 
         return True
@@ -63,6 +111,10 @@ class test(replicate.test):
                             " master id = XXXXX\n")
         self.replace_result("  slave id = ",
                             "  slave id = XXXXX\n")
+        self.replace_result(" master uuid = ",
+                            " master uuid = XXXXX\n")
+        self.replace_result("  slave uuid = ",
+                            "  slave uuid = XXXXX\n")
             
         self.replace_result("               Master_Log_File :",
                             "               Master_Log_File : XXXXX\n")
@@ -90,6 +142,9 @@ class test(replicate.test):
                             "   Slave lower_case_table_names: XX\n")
         self.remove_result("   Replicate_Ignore_Server_Ids :")
         self.remove_result("              Master_Server_Id :")
+        self.remove_result("                     Heartbeat :")
+        self.remove_result("                          Bind :")
+        self.remove_result("            Ignored_server_ids :")
     
     def get_result(self):
         return self.compare(__name__, self.results)

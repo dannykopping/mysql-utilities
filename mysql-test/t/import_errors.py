@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import import_basic
 from mysql.utilities.exception import MUTLibError
@@ -25,18 +39,17 @@ class test(import_basic.test):
 
         _FORMATS = ("CSV", "TAB", "GRID", "VERTICAL")
         test_num = 1
-        for format in _FORMATS:
-            comment = "Test Case %d : Testing import with " % test_num
-            comment += "%s format and NAMES display"
+        for frmt in _FORMATS:
+            comment = ("Test Case %d : Testing import with "
+                       "%s format and NAMES display" % (test_num, frmt))
             # We test DEFINITIONS and DATA only in other tests
-            self.run_import_test(1, from_conn, to_conn,
-                                 format, "BOTH", comment,
-                                 " --display=NAMES")
+            self.run_import_test(1, from_conn, to_conn, 'util_test',
+                                 frmt, "BOTH", comment, " --display=NAMES")
             self.drop_db(self.server2, "util_test")
             test_num += 1
 
         export_cmd = "mysqldbexport.py %s util_test --export=BOTH" % from_conn
-        export_cmd += " --format=SQL "
+        export_cmd += " --format=SQL --skip-gtid "
         export_cmd += " > %s" % self.export_import_file
         
         # First run the export to a file.
@@ -79,7 +92,7 @@ class test(import_basic.test):
         test_num += 1
 
         cmd_str = "mysqldbimport.py %s " % self.export_import_file
-        cmd_str += "--server=nope:nada@localhost:3306"
+        cmd_str += "--server=nope:nada@localhost:%s" % self.server0.port
         comment = "Test case %d - error: cannot connect to server" % test_num
         res = self.run_test_case(1, cmd_str, comment)
         if not res:
@@ -162,7 +175,17 @@ class test(import_basic.test):
         if not res:
             raise MUTLibError("%s: failed" % comment)
         test_num += 1
-        
+
+        # Test database with backticks
+        _FORMATS_BACKTICKS = ("CSV", "TAB")
+        for frmt in _FORMATS_BACKTICKS:
+            comment = ("Test Case %d : Testing import with %s format and "
+                       "NAMES display (using backticks)" % (test_num, frmt))
+            self.run_import_test(1, from_conn, to_conn, '`db``:db`',
+                                 frmt, "BOTH", comment, " --display=NAMES")
+            self.drop_db(self.server2, '`db``:db`')
+            test_num += 1
+
         if os.name != "posix":
             self.replace_result("# Importing definitions and data from "
                                 "std_data\\bad_object.csv",
@@ -172,6 +195,16 @@ class test(import_basic.test):
                                 "std_data\\bad_sql.sql",
                                 "# Importing definitions from "
                                 "std_data/bad_sql.sql.\n")
+
+        self.replace_substring(" (28000)", "")
+        self.replace_result("ERROR: Query failed.", "ERROR: Query failed.\n")
+
+        self.replace_substring("1045 (28000)", "1045")
+
+        self.replace_result("mysqldbimport.py: error: Server connection "
+                            "values invalid",
+                            "mysqldbimport.py: error: Server connection "
+                            "values invalid\n")
 
         return True
 

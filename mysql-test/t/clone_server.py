@@ -1,10 +1,24 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 
 from mysql.utilities.common.server import Server
-from mysql.utilities.exception import MUTLibError
+from mysql.utilities.exception import UtilError, MUTLibError
 
 class test(mutlib.System_test):
     """clone server
@@ -44,14 +58,14 @@ class test(mutlib.System_test):
         # Connect to the new instance
         try:
             new_server.connect()
-        except MUTLibError, e:
+        except UtilError, e:
             raise MUTLibError("Cannot connect to spawned server.")
         
         return new_server
 
     def run(self):
         self.server0 = self.servers.get_server(0)
-        cmd_str = "mysqlserverclone.py --server=%s " % \
+        cmd_str = "mysqlserverclone.py --server=%s --delete-data " % \
                   self.build_connection_string(self.server0)
        
         port1 = int(self.servers.get_next_port())
@@ -80,7 +94,7 @@ class test(mutlib.System_test):
 
         basedir = rows[0][1]
         port2 = int(self.servers.get_next_port())
-        cmd_str = "mysqlserverclone.py --root-password=root "
+        cmd_str = "mysqlserverclone.py --root-password=root --delete-data "
         cmd_str += "--new-port=%d --basedir=%s " % (port2, basedir)
 
         comment = "Test case 2 - clone a server from basedir"

@@ -1,8 +1,23 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import check_rpl
 import mutlib
+import socket
 from mysql.utilities.exception import MUTLibError
 
 class test(check_rpl.test):
@@ -52,10 +67,10 @@ class test(check_rpl.test):
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
-        comment = "Test case 3 - same server"
+        comment = "Test case 3 - same server literal specification"
         same_str = self.build_connection_string(self.server2)
         cmd_opts = " --master=%s --slave=%s" % (same_str, same_str)
-        res = mutlib.System_test.run_test_case(self, 1, cmd_str+cmd_opts,
+        res = mutlib.System_test.run_test_case(self, 2, cmd_str+cmd_opts,
                                                    comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
@@ -75,11 +90,20 @@ class test(check_rpl.test):
                         comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
+            
+        comment = "Test case 6 - master and slave same host"
+        res = mutlib.System_test.run_test_case(self, 2, cmd_str +
+                        master_str + " --slave=root:root@%s:%s" %
+                        (socket.gethostname().split('.', 1)[0],
+                         self.server2.port), comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
 
         self.do_replacements()
 
         # Mask known platform-dependent lines
         self.mask_result("Error 2005:", "(1", '#######')
+        self.replace_substring(" (42000)", "")
         self.replace_result("ERROR: Query failed. 1227: Access denied;",
                             "ERROR: Query failed. 1227: Access denied;\n")
 
@@ -90,6 +114,15 @@ class test(check_rpl.test):
         self.replace_result("Error 2003: Can't connect to",
                             "Error ####: Can't connect to local MySQL server "
                             "####...\n")
+
+        self.replace_result("mysqlrplcheck.py: error: Master connection "
+                            "values invalid",
+                            "mysqlrplcheck.py: error: Master connection "
+                            "values invalid\n")
+        self.replace_result("mysqlrplcheck.py: error: Slave connection "
+                            "values invalid",
+                            "mysqlrplcheck.py: error: Slave connection "
+                            "values invalid\n")
 
         return True
 

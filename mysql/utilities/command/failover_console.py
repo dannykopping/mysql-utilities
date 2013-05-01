@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # Copyright (c) 2010, 2012 Oracle and/or its affiliates. All rights reserved.
 #
@@ -35,6 +34,8 @@ _COMMAND_KEYS = {'\x1b[A':'ARROW_UP', '\x1b[B':'ARROW_DN'}
 # Minimum number of rows needed to display screen
 _MINIMUM_ROWS = 15
 _HEALTH_LIST = "Replication Health Status"
+_MASTER_GTID_LIST = "Master GTID Executed Set"
+_MASTER_GTID_COLS = ['gtid']
 _GTID_LISTS = ["Transactions executed on the servers:",
                "Transactions purged from the servers:",
                "Transactions owned by another server:"]
@@ -44,7 +45,7 @@ _GEN_UUID_COLS = ['host','port','role','uuid']
 _GEN_GTID_COLS = ['host','port','role','gtid']
 _DATE_LEN = 22
 
-_DROP_FC_TABLE = "DROP TABLE mysql.failover_console"
+_DROP_FC_TABLE = "DROP TABLE IF EXISTS mysql.failover_console"
 _CREATE_FC_TABLE = "CREATE TABLE IF NOT EXISTS mysql.failover_console " + \
                    "(host char(30), port char(10))"
 _SELECT_FC_TABLE = "SELECT * FROM mysql.failover_console WHERE host = '%s' " + \
@@ -130,7 +131,11 @@ class FailoverConsole(object):
     topology. The interface supports these commands:
     
       - H = show replication health
-      - G = toggle through GTID lists (GTID_DONE, GTID_LOST, GTID_OWNED)
+      - G = toggle through GTID lists (GTID_EXECUTED, GTID_PURGED, GTID_OWNED)
+      - U = show UUIDs of servers
+      - R = refresh screen
+      - L = (iff --log specified) show log contents
+      - Q = quit the console
     
     """
     
@@ -174,6 +179,8 @@ class FailoverConsole(object):
         self.get_gtid_data = get_gtid_data
         self.get_uuid_data = get_uuid_data
         
+        self.report_mode = 'H'
+        
         self._reset_screen_size()
         
         
@@ -198,6 +205,9 @@ class FailoverConsole(object):
         if self.master is None or self.mode == 'fail':
             return self.mode
         
+        # Turn binary log off first
+        self.master.toggle_binlog("DISABLE")
+        
         host_port = (self.master.host, self.master.port)
         # Drop the table if specified
         if clear:
@@ -217,6 +227,9 @@ class FailoverConsole(object):
         # Unregister the console if our mode was changed
         elif self.old_mode != self.mode:
             res = self.master.exec_query(_DELETE_FC_TABLE % host_port)
+        
+        # Turn binary log on
+        self.master.toggle_binlog("ENABLE")
         
         return self.mode
 
@@ -247,16 +260,23 @@ class FailoverConsole(object):
 
         # Get GTID lists
         self.gtid_list += 1
-        if self.gtid_list > 2:
+        if self.gtid_list > 3:
             self.gtid_list = 0
-        if self.get_gtid_data is not None:
+        if self.gtid_list == 0 and self.master_gtids:
+            self.comment = _MASTER_GTID_LIST
+            rows = self.master_gtids
+        elif self.get_gtid_data:
             gtid_data = self.get_gtid_data()
-            self.comment = _GTID_LISTS[self.gtid_list]
-            rows = gtid_data[self.gtid_list]
+            self.comment = _GTID_LISTS[self.gtid_list - 1]
+            rows = gtid_data[self.gtid_list - 1]
             
         self.start_list = 0
         self.end_list = len(rows)
-        return (_GEN_GTID_COLS, rows)
+        self.report_mode = 'G'
+        if self.gtid_list == 0:
+            return (_MASTER_GTID_COLS, rows)
+        else:
+            return (_GEN_GTID_COLS, rows)
 
 
     def _format_health_data(self):
@@ -273,6 +293,7 @@ class FailoverConsole(object):
             health_data = self.get_health_data()
             self.start_list = 0
             self.end_list = len(health_data[1])
+            self.report_mode = 'H'
             return health_data
         
         return ([], [])
@@ -292,9 +313,9 @@ class FailoverConsole(object):
             self.comment = _UUID_LIST
             rows = self.get_uuid_data()
 
-        print rows
         self.start_list = 0
         self.end_list = len(rows)
+        self.report_mode = 'U'
         return (_GEN_UUID_COLS, rows)
         
     
@@ -316,6 +337,7 @@ class FailoverConsole(object):
             self.start_list = 0
             self.end_list = len(rows)
 
+        self.report_mode = 'L'
         return(cols, rows)
 
         
@@ -455,8 +477,25 @@ class FailoverConsole(object):
         logfile = status[0][0:20] if len(status[0]) > 20 else status[0]
         rows = [(logfile, status[1], status[2], status[3])]
         format_tabular_list(sys.stdout, cols, rows, fmt_opts)
+        
+        # Display gtid executed set
+        self.master_gtids = []
+        for gtid in status[4].split("\n"):
+            if len(gtid):
+                # Add each GTID to a tuple to match the required format to
+                # print the full GRID list correctly.
+                self.master_gtids.append((gtid.strip(","),))
+        print "\nGTID Executed Set"
+        try:
+            print self.master_gtids[0][0],
+        except IndexError:
+            print "None",
+        if len(self.master_gtids) > 1:
+            print "[...]"
+        else:
+            print
         print
-        self.rows_printed += 4
+        self.rows_printed += 7
     
     
     def _scroll(self, key):
@@ -574,6 +613,9 @@ class FailoverConsole(object):
         self._reset_screen_size()
         self._print_header()
         self._print_master_status()
+        # refresh health if already displayed
+        if self.report_mode == 'H':
+            self.list_data = self._format_health_data()
         self._print_list(False)
         self._print_footer(self.scroll_on)
         
@@ -611,6 +653,10 @@ class FailoverConsole(object):
             if key in ['Q','q']:
                 return True
             else:
+                # Refresh health on interval
+                if self.report_mode == 'H':
+                    self.list_data = self._format_health_data()
+                    self._print_list()
                 self._do_command(key)
 
         return False

@@ -9,16 +9,18 @@ Options:
   --candidates=CANDIDATES
                         connection information for candidate slave servers for
                         failover in the form:
-                        <user>:<password>@<host>:<port>:<socket>. Valid only
-                        with failover command. List multiple slaves in comma-
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>]. Valid only with
+                        failover command. List multiple slaves in comma-
                         separated list.
   --discover-slaves-login=DISCOVER
                         at startup, query master for all registered slaves and
                         use the user name and password specified to connect.
                         Supply the user and password in the form
-                        user:password. For example, --discover=joe:secret will
-                        use 'joe' as the user and 'secret' as the password for
-                        each discovered slave.
+                        <user>[:<password>] or <login-path>. For example,
+                        --discover-slaves-login=joe:secret will use 'joe' as
+                        the user and 'secret' as the password for each
+                        discovered slave.
   --exec-after=EXEC_AFTER
                         name of script to execute after failover or switchover
   --exec-before=EXEC_BEFORE
@@ -29,7 +31,8 @@ Options:
                         older than this will be purged on startup. Default = 7
                         days.
   --master=MASTER       connection information for master server in the form:
-                        <user>:<password>@<host>:<port>:<socket>
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>]
   --max-position=MAX_POSITION
                         Used to detect slave delay. The maximum difference
                         between the master's log position and the slave's
@@ -42,16 +45,19 @@ Options:
                         seconds behind the master permitted before slave is
                         considered behind the master. Default is 0.
   --slaves=SLAVES       connection information for slave servers in the form:
-                        <user>:<password>@<host>:<port>:<socket>. List
-                        multiple slaves in comma-separated list.
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>]. List multiple slaves
+                        in comma-separated list.
   --timeout=TIMEOUT     Maximum timeout in seconds to wait for each
                         replication command to complete. For example, timeout
-                        for slave waiting to catch up to master. Default = 3.
+                        for slave waiting to catch up to master. Default =
+                        300.
   --new-master=NEW_MASTER
                         connection information for the slave to be used to
-                        replace the master for switchover in the form:
-                        <user>:<password>@<host>:<port>:<socket>. Valid only
-                        with switchover command.
+                        replace the master for switchover, in the form:
+                        <user>[:<password>]@<host>[:<port>][:<socket>] or
+                        <login-path>[:<port>][:<socket>]. Valid only with
+                        switchover command.
   --force               ignore prerequsite check results and execute action
   -f FORMAT, --format=FORMAT
                         display the output in either grid (default), tab, csv,
@@ -61,6 +67,9 @@ Options:
   -v, --verbose         control how much information is displayed. e.g., -v =
                         verbose, -vv = more verbose, -vvv = debug
   -q, --quiet           turn off all messages for quiet execution.
+  --rpl-user=RPL_USER   the user and password for the replication user
+                        requirement, in the form: <user>[:<password>] or
+                        <login-path>. E.g. rpl:passwd - By default = none
 
 Available Commands:
 
@@ -68,12 +77,17 @@ Available Commands:
   failover    - conduct failover from master to best slave
   gtid        - show status of global transaction id variables
                 also displays uuids for all servers
-  health      - display the replication health 
+  health      - display the replication health
   reset       - stop and reset all slaves
   start       - start all slaves
   stop        - stop all slaves
   switchover  - perform slave promotion
-  
+
+  Note: elect, failover, gtid, and health require --master and either
+        --slaves or --discover-slave-login
+
+  Note: start, stop and reset require --master and --slaves
+
 Test case 2 - test slave discovery
 # Discovering slaves for master at localhost:PORT1
 # Checking privileges.
@@ -98,8 +112,9 @@ WARNING: The --ping option is used only with the health command.
 #   Slave connected to master ... Ok
 #   Slave not behind master ... Ok
 #   Logging filters agree ... Ok
-#   Logging filters agree ... Ok
 #   Binary logging turned on ... Ok
+#   Replication user exists ... Ok
+# When the master_info_repository variable is set to FILE, the --rpl-user option may be used only if the user specified matches what is shown in the SLAVE STATUS output unless the --force option is used.
 # Creating replication user if it does not exist.
 # Blocking writes on master.
 # LOCK STRING: FLUSH TABLES WITH READ LOCK
@@ -136,11 +151,11 @@ NOTE: Log file 'temp_log.txt' does not exist. Will be created.
 | host       | port  | role    | state  | gtid_mode  | health  |
 +------------+-------+---------+--------+------------+---------+
 | localhost  | PORT1  | MASTER  | UP     | NO         | OK      |
+| localhost  | PORT2  | SLAVE   | UP     | NO         | OK      |
 | localhost  | PORT3  | SLAVE   | UP     | NO         | OK      |
 | localhost  | PORT4  | SLAVE   | UP     | NO         | OK      |
-| localhost  | PORT2  | SLAVE   | UP     | NO         | OK      |
 +------------+-------+---------+--------+------------+---------+
-A switchover writes 15 entries in the log.
+Switchover has written to the log.
 There are (before) 2 entries in the log.
 Test case 5 - switchover with logs
 WARNING: The --ping option is used only with the health command.
@@ -163,12 +178,12 @@ WARNING: The --ping option is used only with the health command.
 | host       | port  | role    | state  | gtid_mode  | health  |
 +------------+-------+---------+--------+------------+---------+
 | localhost  | PORT2  | MASTER  | UP     | NO         | OK      |
+| localhost  | PORT1  | SLAVE   | UP     | NO         | OK      |
 | localhost  | PORT3  | SLAVE   | UP     | NO         | OK      |
 | localhost  | PORT4  | SLAVE   | UP     | NO         | OK      |
-| localhost  | PORT1  | SLAVE   | UP     | NO         | OK      |
 +------------+-------+---------+--------+------------+---------+
 # ...done.
-There are (after) 16 entries in the log.
+There are additional entries in the log.
 Test case 6 - attempt risky switchover without force
 WARNING: The --ping option is used only with the health command.
 # Checking privileges.
@@ -179,14 +194,14 @@ ERROR: Candidate is not connected to the correct master.
 # Errors found. Switchover aborted.
 #
 # Replication Topology Health:
-+------------+-------+---------+--------+------------+---------------------------+
-| host       | port  | role    | state  | gtid_mode  | health                    |
-+------------+-------+---------+--------+------------+---------------------------+
-| localhost  | PORT3  | MASTER  | UP     | NO         | OK                        |
-| localhost  | PORT1  | SLAVE   | WARN   |            | Cannot connect to slave.  |
-| localhost  | PORT2  | SLAVE   | WARN   |            | Cannot connect to slave.  |
-| localhost  | PORT4  | SLAVE   | WARN   |            | Cannot connect to slave.  |
-+------------+-------+---------+--------+------------+---------------------------+
++------------+-------+---------+--------+------------+------------------------------------+
+| host       | port  | role    | state  | gtid_mode  | health                             |
++------------+-------+---------+--------+------------+------------------------------------+
+| localhost  | PORT3  | MASTER  | UP     | NO         | OK                                 |
+| localhost  | PORT1  | SLAVE   | WARN   |            | Slave is not connected to master.  |
+| localhost  | PORT2  | SLAVE   | WARN   |            | Slave is not connected to master.  |
+| localhost  | PORT4  | SLAVE   | WARN   |            | Slave is not connected to master.  |
++------------+-------+---------+--------+------------+------------------------------------+
 # ...done.
 Test case 7 - attempt risky switchover with --force
 WARNING: The --ping option is used only with the health command.

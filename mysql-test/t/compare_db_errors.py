@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import compare_db
 from mysql.utilities.exception import MUTLibError
@@ -46,12 +60,39 @@ class test(compare_db.test):
             raise MUTLibError("%s: failed" % comment)
 
         cmd_str = "mysqldbcompare.py %s %s" % (s1_conn, s2_conn)
-        cmd_opts = " inventory.inventory" 
-        comment = "Test case 3 - malformed argument%s " % cmd_opts
-        res = self.run_test_case(1, cmd_str + cmd_opts, comment)
+        cmd_opts = " inventory.inventory"
+        comment = "Test case 3 - missing backticks%s " % cmd_opts
+        res = self.run_test_case(2, cmd_str + cmd_opts, comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
-        
+
+        # Set input parameter with appropriate quotes for the OS
+        if os.name == 'posix':
+            cmd_opts = "'`inventory.inventory`'"
+        else:
+            cmd_opts = '"`inventory.inventory`"'
+        cmd_str = "mysqldbcompare.py %s %s %s" % (s1_conn, s2_conn, cmd_opts)
+        comment = "Test case 4 - non existing database '`inventory.inventory`'"
+        res = self.run_test_case(1, cmd_str, comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+
+        cmd_str = "mysqldbcompare.py %s %s" % (s1_conn, s2_conn)
+        cmd_opts = " :inventory"
+        comment = "Test case 5 - invalid format%s " % cmd_opts
+        res = self.run_test_case(2, cmd_str + cmd_opts, comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+
+        self.replace_result("mysqldbcompare.py: error: Server1 connection "
+                            "values invalid",
+                            "mysqldbcompare.py: error: Server1 connection "
+                            "values invalid\n")
+        self.replace_result("mysqldbcompare.py: error: Server2 connection "
+                            "values invalid",
+                            "mysqldbcompare.py: error: Server2 connection "
+                            "values invalid\n")
+
         return True
 
     def get_result(self):

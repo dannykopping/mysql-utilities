@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import import_basic
 from mysql.utilities.exception import MUTLibError
@@ -48,7 +62,7 @@ class test(import_basic.test):
 
         _FORMAT_DISPLAY = ("sql","grid","csv","tab","vertical")
 
-        exp_cmd_str = "mysqldbexport.py util_test --export=data " \
+        exp_cmd_str = "mysqldbexport.py util_test --export=data --skip-gtid " \
                       "--file-per-table %s --quiet --format=" % from_conn
         imp_cmd_str = "mysqldbimport.py --import=data %s --format=" % to_conn
         starting_case_num = 1

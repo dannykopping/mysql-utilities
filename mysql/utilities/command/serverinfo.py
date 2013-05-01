@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,10 +19,10 @@
 This file contains the reporting mechanisms for reporting disk usage.
 """
 
-import locale
 import os
 import subprocess
 import sys
+import re
 
 from mysql.utilities.exception import UtilError
 from mysql.utilities.common.options import parse_connection
@@ -96,7 +95,7 @@ def _server_info(server_val, get_defaults=False, options={}):
     verbosity = options.get("verbosity", 0)
 
     # Parse source connection values
-    source_values = parse_connection(server_val)
+    source_values = parse_connection(server_val, None, options)
 
     # Connect to the server
     conn_options = {
@@ -246,6 +245,7 @@ def _start_server(server_val, basedir, datadir, options={}):
         time.sleep(1)
     server.connect()
     print "done."
+    return server
     
 
 def _stop_server(server_val, basedir, options={}):
@@ -360,33 +360,63 @@ def show_server_info(servers, options):
     server_val = {}
     get_defaults = True
     for server in servers:
-        server_alive = True
-        server_started = False
-        if not test_connect(server):
-            if basedir is None or datadir is None:
-                raise UtilError("Server is offline. To connection, "
-                                     "you must provide basedir, datadir, "
-                                     "and the start option")
+        new_server = None
+        try:
+            test_connect(server, True)
+        except UtilError as util_error:
+            if util_error.errmsg.startswith("Server connection values invalid:"):
+                raise util_error
+            # If we got an exception it may means that the server is offline
+            # in that case we will try to turn a clone to extract the info
+            # if the user passed the necessary parameters.
+            pattern = ".*?: (.*?)\((.*)\)"
+            res = re.match(pattern, util_error.errmsg, re.S)
+            if not res:
+                er = ["error: <%s>" % util_error.errmsg]
             else:
-                if start:
+                er = res.groups()
+
+            if (re.search("refused", "".join(er)) or 
+                re.search("Can't connect to local MySQL server through socket",
+                           "".join(er))):
+                er = ["Server is offline. To connect, "
+                      "you must also provide "]
+            
+                opts = ["basedir", "datadir", "start"]
+                for opt in tuple(opts):
                     try:
-                        server_val = parse_connection(server)
-                    except:
-                        raise UtilError("Source connection values in"
-                                             "valid or cannot be parsed.")
-                    res = _start_server(server_val, basedir, datadir, options)
-                    server_started = True                    
-                else:
-                    server_alive = False
-        if server_alive:
-            info, defaults = _server_info(server, get_defaults, options)
-            if info is not None:
-                rows.append(info)
-            if defaults is not None and len(defaults_rows) == 0:
-                defaults_rows = defaults
-                get_defaults = False
-        if server_started:
+                        if locals()[opt] is not None:
+                            opts.remove(opt)
+                    except KeyError:
+                        pass
+                if opts:
+                    er.append(", ".join(opts[0:-1]))
+                    if len(opts) > 1:
+                        er.append(" and the ")
+                    er.append(opts[-1])
+                    er.append(" option")
+                    raise UtilError("".join(er))
+
+            if not start:
+                raise UtilError("".join(er))
+            else:    
+                try:
+                    server_val = parse_connection(server, None, options)
+                except:
+                    raise UtilError("Source connection values invalid"
+                                    " or cannot be parsed.")
+                new_server = _start_server(server_val, basedir,
+                                           datadir, options)
+
+        info, defaults = _server_info(server, get_defaults, options)
+        if info:
+            rows.append(info)
+        if defaults and len(defaults_rows) == 0:
+            defaults_rows = defaults
+            get_defaults = False
+        if new_server:
             # Need to stop the server!
+            new_server.disconnect()
             res = _stop_server(server_val, basedir, options)
 
     print_list(sys.stdout, format, _COLUMNS, rows, no_headers)

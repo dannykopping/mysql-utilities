@@ -1,9 +1,27 @@
-
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
-from mysql.utilities.exception import MUTLibError, UtilDBError
+
+from mysql.utilities.common.table import quote_with_backticks
+
+from mysql.utilities.exception import MUTLibError
+from mysql.utilities.exception import UtilError
+
 
 class test(mutlib.System_test):
     """simple db diff
@@ -26,17 +44,30 @@ class test(mutlib.System_test):
         if self.need_server:
             try:
                 self.servers.spawn_new_servers(2)
-            except MUTLibError, e:
-                raise MUTLibError("Cannot spawn needed servers: " + e.errmsg)
+            except MUTLibError as err:
+                raise MUTLibError("Cannot spawn needed servers: %s"
+                                  % err.errmsg)
         self.server2 = self.servers.get_server(1)
         self.drop_all()
         data_file = os.path.normpath("./std_data/db_compare_test.sql")
         try:
             res = self.server1.read_and_exec_SQL(data_file, self.debug)
             res = self.server2.read_and_exec_SQL(data_file, self.debug)
-        except MUTLibError, e:
-            raise MUTLibError("Failed to read commands from file %s: " % \
-                               data_file + e.errmsg)
+        except UtilError as err:
+            raise MUTLibError("Failed to read commands from file %s: %s"
+                              % (data_file, err.errmsg))
+
+        # Create backtick database (with weird names)
+        data_file_backticks = os.path.normpath(
+                                        "./std_data/db_compare_backtick.sql")
+        try:
+            res = self.server1.read_and_exec_SQL(data_file_backticks,
+                                                 self.debug)
+            res = self.server2.read_and_exec_SQL(data_file_backticks,
+                                                 self.debug)
+        except UtilError as err:
+            raise MUTLibError("Failed to read commands from file %s: %s"
+                              % (data_file_backticks, err.errmsg))
 
         return True
     
@@ -65,8 +96,8 @@ class test(mutlib.System_test):
             res = self.server2.exec_query("DELETE FROM inventory.supplies "
                                           "WHERE cost = 10.00 AND "
                                           "type = 'cleaning'")
-        except UtilDBError, e:
-            raise MUTLibError("Failed to execute query: " + e.errmsg)
+        except UtilError as err:
+            raise MUTLibError("Failed to execute query: %s" % err.errmsg)
 
     
     def run(self):
@@ -135,6 +166,20 @@ class test(mutlib.System_test):
         if not res:
             raise MUTLibError("%s: failed" % comment)
 
+        # Set input parameter with appropriate quotes for the OS
+        if os.name == 'posix':
+            cmd_arg = "'`db``:db`:`db``:db`' -a"
+        else:
+            cmd_arg = '"`db``:db`:`db``:db`" -a'
+        cmd_str = "mysqldbcompare.py %s %s %s" % (s1_conn, s2_conn, cmd_arg)
+        comment = ("Test case 8 - compare a database with weird names "
+                   "(backticks)")
+        res = self.run_test_case(0, cmd_str, comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+
+        self.do_replacements()
+
         return True
           
     def get_result(self):
@@ -149,6 +194,10 @@ class test(mutlib.System_test):
             for name in names:
                 self.replace_result("%s inventory.%s" % (prefix, name),
                                     "%s inventory.%s\n" % (prefix, name))
+                
+        # Mask inconsistent Python 2.7 behavior
+        self.replace_result("@@ -1 +1 @@", "@@ -1,1 +1,1 @@\n")
+        self.replace_result("# @@ -1 +1 @@", "# @@ -1,1 +1,1 @@\n")
     
     def record(self):
         return self.save_result_file(__name__, self.results)
@@ -156,11 +205,12 @@ class test(mutlib.System_test):
     def drop_db(self, server, db):
         # Check before you drop to avoid warning
         try:
-            res = server.exec_query("SHOW DATABASES LIKE 'util_%'")
+            res = server.exec_query("SHOW DATABASES LIKE '%s'" % db)
         except:
             return True # Ok to exit here as there weren't any dbs to drop
         try:
-            res = server.exec_query("DROP DATABASE " + db)
+            q_db = quote_with_backticks(db)
+            res = server.exec_query("DROP DATABASE %s" % q_db)
         except:
             return False
         return True
@@ -170,6 +220,8 @@ class test(mutlib.System_test):
         self.drop_db(self.server1, "inventory1")
         self.drop_db(self.server1, "inventory2")
         self.drop_db(self.server2, "inventory")
+        self.drop_db(self.server1, 'db`:db')
+        self.drop_db(self.server2, 'db`:db')
         return True
 
     def cleanup(self):

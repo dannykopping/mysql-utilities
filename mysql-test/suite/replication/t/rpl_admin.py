@@ -1,5 +1,19 @@
-#!/usr/bin/env python
-
+#
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+#
 import os
 import mutlib
 from mysql.utilities.exception import MUTLibError
@@ -19,10 +33,17 @@ class test(mutlib.System_test):
             raise MUTLibError("Test requires server version prior to 5.6.5")
         return self.check_num_servers(1)
 
-    def spawn_server(self, name, mysqld=None):
+    def spawn_server(self, name, mysqld=None, kill=False):
+        index = self.servers.find_server_by_name(name)
+        if index >= 0 and kill:
+            server = self.servers.get_server(index)
+            if self.debug:
+                print "# Killing server %s." % server.role
+            self.servers.stop_server(server)
+            self.servers.remove_server(server.role)
+            index = -1
         if self.debug:
             print "# Spawning %s" % name
-        index = self.servers.find_server_by_name(name)
         if index >= 0:
             if self.debug:
                 print "# Found it in the servers list."
@@ -62,6 +83,10 @@ class test(mutlib.System_test):
         self.s1_port = self.server2.port
         self.s2_port = self.server3.port
         self.s3_port = self.server4.port
+        
+        for slave in [self.server2, self.server3, self.server4]:
+            slave.exec_query("GRANT REPLICATION SLAVE ON *.* TO "
+                              "'rpl'@'localhost' IDENTIFIED BY 'rpl'")
 
         # Form replication topology - 1 master, 3 slaves
         return self.reset_topology()
@@ -83,6 +108,13 @@ class test(mutlib.System_test):
                                                comment)
         if not res:
             raise MUTLibError("%s: failed" % comment)
+            
+        # Build connection string with loopback address instead of localhost
+        slave_ports = [self.server2.port, self.server3.port, self.server4.port]
+        slaves_loopback = "root:root@127.0.0.1:%s," % self.server2.port
+        slaves_loopback += "root:root@127.0.0.1:%s," % self.server3.port
+        slaves_loopback += "root:root@127.0.0.1:%s" % self.server4.port
+        slave3_conn_ip = slave3_conn.replace("localhost", "127.0.0.1")
 
         # Perform switchover from original master to all other slaves and back.
         test_cases = [
@@ -93,14 +125,15 @@ class test(mutlib.System_test):
              slave2_conn, "slave2", [slave1_conn, slave3_conn, master_conn]),
             (slave2_conn, [slave1_conn, slave3_conn, master_conn],
              slave3_conn, "slave3", [slave2_conn, slave1_conn, master_conn]),
-            (slave3_conn, [slave2_conn, slave1_conn, master_conn],
+            (slave3_conn_ip, ["root:root@127.0.0.1:%s" % self.server3.port,
+                           slave1_conn, master_conn],
              master_conn, "master", [slave1_conn, slave2_conn, slave3_conn]),
         ]
         test_num = 2
         for case in test_cases:
             slaves_str = ",".join(case[1])
             comment = "Test case %s - switchover to %s" % (test_num, case[3])
-            cmd_str = "mysqlrpladmin.py --master=%s " % case[0]
+            cmd_str = "mysqlrpladmin.py --master=%s --rpl-user=rpl:rpl " % case[0]
             cmd_opts = " --new-master=%s --demote-master " % case[2]
             cmd_opts += " --slaves=%s switchover" % slaves_str
             res = mutlib.System_test.run_test_case(self, 0, cmd_str+cmd_opts,
@@ -117,6 +150,16 @@ class test(mutlib.System_test):
             if not res:
                 raise MUTLibError("%s: failed" % comment)
             test_num += 1
+
+        cmd_str = "mysqlrpladmin.py --master=%s " % master_conn
+        cmd_opts = " health --disc=root:root "
+        cmd_opts += "--slaves=%s" % slaves_loopback
+        comment= "Test case %s - health with loopback and discovery" % test_num
+        res = mutlib.System_test.run_test_case(self, 0, cmd_str+cmd_opts,
+                                               comment)
+        if not res:
+            raise MUTLibError("%s: failed" % comment)
+        test_num += 1
 
         # Perform stop, start, and reset
         commands = ['stop', 'start', 'stop', 'reset']
@@ -139,15 +182,22 @@ class test(mutlib.System_test):
         return True
 
     def do_masks(self):
-        self.replace_substring("%s" % self.m_port, "PORT1")
-        self.replace_substring("%s" % self.s1_port, "PORT2")
-        self.replace_substring("%s" % self.s2_port, "PORT3")
-        self.replace_substring("%s" % self.s3_port, "PORT4")
+        self.replace_substring(str(self.m_port), "PORT1")
+        self.replace_substring(str(self.s1_port), "PORT2")
+        self.replace_substring(str(self.s2_port), "PORT3")
+        self.replace_substring(str(self.s3_port), "PORT4")
         
     def reset_topology(self):
         # Form replication topology - 1 master, 3 slaves
-        self.master_str = "--master=%s" % \
+        self.master_str = " --master=%s" % \
                           self.build_connection_string(self.server1)
+        for slave in [self.server1, self.server2, self.server3, self.server4]:
+            try:
+                slave.exec_query("STOP SLAVE")
+                slave.exec_query("RESET SLAVE")
+            except:
+                pass
+        
         for slave in [self.server2, self.server3, self.server4]:
             slave_str = " --slave=%s" % self.build_connection_string(slave)
             conn_str = self.master_str + slave_str

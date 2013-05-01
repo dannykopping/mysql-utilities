@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,17 +12,16 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 
 """
 This file contains the commands for checking consistency of two databases.
 """
 
-import sys
-
-from mysql.utilities.common.options import parse_connection
-from mysql.utilities.exception import UtilError, UtilDBError
+from mysql.utilities.common.sql_transform import quote_with_backticks
+from mysql.utilities.exception import UtilDBError
+from mysql.utilities.exception import UtilError
 
 _PRINT_WIDTH = 75
 _ROW_FORMAT = "# {0:{1}} {2:{3}} {4:{5}} {6:{7}} {8:{9}}"
@@ -440,9 +438,13 @@ def database_compare(server1_val, server2_val, db1, db2, options):
     for item in in_both:
         error_list = []
         obj_type = db1_conn.get_object_type(item[1][0])
-        
+
         obj1 = "{0}.{1}".format(db1, item[1][0])
         obj2 = "{0}.{1}".format(db2, item[1][0])
+        q_obj1 = "{0}.{1}".format(quote_with_backticks(db1),
+                                  quote_with_backticks(item[1][0]))
+        q_obj2 = "{0}.{1}".format(quote_with_backticks(db2),
+                                  quote_with_backticks(item[1][0]))
 
         reporter.report_object(obj_type, item[1][0])
 
@@ -453,7 +455,7 @@ def database_compare(server1_val, server2_val, db1, db2, options):
         
         # Check row counts
         if obj_type == 'TABLE':
-            errors = _check_row_counts(server1, server2, obj1, obj2,
+            errors = _check_row_counts(server1, server2, q_obj1, q_obj2,
                                        reporter, options)
             if len(errors) != 0:
                 success = False
@@ -463,7 +465,7 @@ def database_compare(server1_val, server2_val, db1, db2, options):
             
         # Check data consistency for tables
         if obj_type == 'TABLE':
-            errors = _check_data_consistency(server1, server2, obj1, obj2,
+            errors = _check_data_consistency(server1, server2, q_obj1, q_obj2,
                                              reporter, options)
             if len(errors) != 0:
                 success = False

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,6 +21,11 @@ This file contains the replication slave administration utility. It is used to
 perform replication operations on one or more slaves.
 """
 
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import logging
 import optparse
 import os.path
@@ -28,8 +33,10 @@ import signal
 import sys
 
 from mysql.utilities.exception import UtilError, UtilRplError
-from mysql.utilities.common.options import parse_connection, add_verbosity
-from mysql.utilities.common.options import add_failover_options
+from mysql.utilities.common.options import add_verbosity
+from mysql.utilities.common.options import add_failover_options, add_rpl_user
+from mysql.utilities.common.options import check_server_lists
+from mysql.utilities.common.server import check_hostname_alias
 from mysql.utilities.common.topology import parse_failover_connections
 from mysql.utilities.command.rpl_admin import RplCommands, purge_log
 from mysql.utilities import VERSION_FRM
@@ -37,7 +44,7 @@ from mysql.utilities import VERSION_FRM
 # Constants
 NAME = "MySQL Utilities - mysqlfailover "
 DESCRIPTION = "mysqlfailover - automatic replication health monitoring and failover"
-USAGE = "%prog --master=roo@localhost --discover-slaves-login=root " + \
+USAGE = "%prog --master=root@localhost --discover-slaves-login=root " + \
         "--candidates=root@host123:3306,root@host456:3306 " 
 _DATE_FORMAT = '%Y-%m-%d %H:%M:%S %p'
 _DATE_LEN = 22
@@ -122,17 +129,35 @@ parser.add_option("--exec-post-failover", action="store", dest="exec_post_fail",
                   "execute after failover is complete and the utility has "
                   "refreshed the health report.")
 
+
+# Add rediscover on interval
+parser.add_option("--rediscover", action="store_true", dest="rediscover",
+                  help="Rediscover slaves on interval. Allows console to "
+                  "detect when slaves have been removed or added.")
+
 # Add verbosity mode
 add_verbosity(parser, False)
+
+# Replication user and password
+add_rpl_user(parser, None)
 
 # Now we process the rest of the arguments.
 opt, args = parser.parse_args()
 
+# Check slaves list
+check_server_lists(parser, opt.master, opt.slaves)
 
 # Check for errors
 if int(opt.interval) < 5:
     parser.error("The --interval option requires a value greater than or "
                  "equal to 5.")
+
+# The value for --timeout needs to be an integer > 0.
+try:
+    if int(opt.timeout) <= 0:
+        parser.error("The --timeout option requires a value greater than 0.")
+except ValueError:
+    parser.error("The --timeout option requires an integer value.")
 
 if opt.master is None:
     parser.error("You must specify a master to monitor.")
@@ -147,9 +172,18 @@ if opt.failover_mode == 'elect' and opt.candidates is None:
 # Parse the master, slaves, and candidates connection parameters
 try: 
     master_val, slaves_val, candidates_val = parse_failover_connections(opt)
-except UtilRplError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except UtilRplError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
+
+# Check hostname alias
+for slave_val in slaves_val:
+    if check_hostname_alias(master_val, slave_val):
+        parser.error("The master and one of the slaves are the same host and port.")
+for cand_val in candidates_val:
+    if check_hostname_alias(master_val, cand_val):
+        parser.error("The master and one of the candidates are the same host and port.")
 
 # Create dictionary of options
 options = {
@@ -162,13 +196,15 @@ options = {
     'max_position'  : opt.max_position,
     'max_delay'     : opt.max_delay,
     'discover'      : opt.discover,
-    'timeout'       : opt.timeout,
+    'timeout'       : int(opt.timeout),
     'interval'      : opt.interval,
     'failover_mode' : opt.failover_mode,
     'logging'       : opt.log_file is not None,
     'log_file'      : opt.log_file,
     'force'         : opt.force,
     'post_fail'     : opt.exec_post_fail,
+    'rpl_user'      : opt.rpl_user,
+    'rediscover'    : opt.rediscover,
 }
 
 # Purge log file of old data
@@ -183,9 +219,12 @@ logging.basicConfig(filename=opt.log_file, level=logging.INFO,
 try:
     rpl_cmds = RplCommands(master_val, slaves_val, options)
     rpl_cmds.auto_failover(opt.interval)
-except UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    # log the error in case it was an usual exception
+    logging.log(logging.CRITICAL, e.errmsg.strip(' '))  
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
     
-exit(0)
+sys.exit(0)
 

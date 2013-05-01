@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,14 +21,20 @@ This file contains the copy database utility which ensures a database
 is exactly the same among two servers.
 """
 
-import optparse
+from mysql.utilities.common.tools import check_python_version
+
+# Check Python version compatibility
+check_python_version()
+
 import os
 import re
 import sys
 import time
 
-from mysql.utilities import VERSION_FRM
 from mysql.utilities.command import dbcopy
+from mysql.utilities.common.messages import PARSE_ERR_DB_PAIR
+from mysql.utilities.common.messages import PARSE_ERR_DB_PAIR_EXT
+from mysql.utilities.common.my_print_defaults import MyDefaultsReader
 from mysql.utilities.common.options import setup_common_options
 from mysql.utilities.common.options import parse_connection, add_skip_options
 from mysql.utilities.common.options import add_verbosity, check_verbosity
@@ -36,6 +42,10 @@ from mysql.utilities.common.options import check_skip_options, add_engines
 from mysql.utilities.common.options import add_all, check_all, add_locking
 from mysql.utilities.common.options import add_regexp, add_rpl_mode
 from mysql.utilities.common.options import check_rpl_options, add_rpl_user
+from mysql.utilities.common.sql_transform import is_quoted_with_backticks
+from mysql.utilities.common.sql_transform import remove_backtick_quoting
+
+from mysql.utilities.exception import FormatError
 from mysql.utilities.exception import UtilError
 
 # Constants
@@ -65,13 +75,15 @@ parser = setup_common_options(os.path.basename(sys.argv[0]),
 parser.add_option("--source", action="store", dest="source",
                   type = "string", default="root@localhost:3306",
                   help="connection information for source server in " + \
-                  "the form: <user>:<password>@<host>:<port>:<socket>")
+                  "the form: <user>[:<password>]@<host>[:<port>][:<socket>]"
+                  " or <login-path>[:<port>][:<socket>].")
 
 # Connection information for the destination server
 parser.add_option("--destination", action="store", dest="destination",
                   type = "string",
                   help="connection information for destination server in " + \
-                  "the form: <user>:<password>@<host>:<port>:<socket>")
+                  "the form: <user>[:<password>]@<host>[:<port>][:<socket>]"
+                  " or <login-path>[:<port>][:<socket>].")
 
 # Overwrite mode
 parser.add_option("-f", "--force", action="store_true", dest="force",
@@ -116,14 +128,20 @@ add_rpl_user(parser, None)
 # Add replication options but don't include 'both'
 add_rpl_mode(parser, False, False)
 
+# Add option to skip GTID generation
+parser.add_option("--skip-gtid", action="store_true", default=False,
+                  dest="skip_gtid", help="skip creation and execution of "
+                  "GTID statements during copy.")
+
 # Now we process the rest of the arguments.
 opt, args = parser.parse_args()
 
 try:
     skips = check_skip_options(opt.skip_objects)
-except UtilError, e:
-    print "ERROR: %s" % e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
 
 # Fail if no options listed.
 if opt.destination is None:
@@ -165,19 +183,33 @@ options = {
     "rpl_user"         : opt.rpl_user,
     "rpl_mode"         : opt.rpl_mode,
     "verbosity"        : opt.verbosity,
+    "skip_gtid"        : opt.skip_gtid,
 }
 
 # Parse source connection values
 try:
-    source_values = parse_connection(opt.source)
-except:
-    parser.error("Source connection values invalid or cannot be parsed.")
+    # Create a basic configuration reader first for optimization purposes.
+    # I.e., to avoid repeating the execution of some methods in further
+    # parse_connection methods (like, searching my_print_defaults tool).
+    config_reader = MyDefaultsReader(options, False)
+    source_values = parse_connection(opt.source, config_reader, options)
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Source connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Source connection values invalid: %s." % err.errmsg)
 
 # Parse destination connection values
 try:
-    dest_values = parse_connection(opt.destination)
-except:
-    parser.error("Destination connection values invalid or cannot be parsed.")
+    dest_values = parse_connection(opt.destination, config_reader, options)
+except FormatError:
+    _, err, _ = sys.exc_info()
+    parser.error("Destination connection values invalid: %s." % err)
+except UtilError:
+    _, err, _ = sys.exc_info()
+    parser.error("Destination connection values invalid: %s."
+                 % err.errmsg)
 
 # Check to see if attempting to use --rpl on the same server
 if (opt.rpl_mode or opt.rpl_user) and source_values == dest_values:
@@ -186,14 +218,40 @@ if (opt.rpl_mode or opt.rpl_user) and source_values == dest_values:
 
 # Check replication options
 check_rpl_options(parser, opt)
-    
+
 # Build list of databases to copy
 db_list = []
 for db in args:
-    grp = re.match("(\w+)(?:\:(\w+))?", db)
+    # Split the database names considering backtick quotes
+    grp = re.match(r"(`(?:[^`]|``)+`|\w+)(?:(?:\:)(`(?:[^`]|``)+`|\w+))?", db)
     if not grp:
-        parser.error("Cannot parse database list. Error on '%s'." % db)
+        parser.error(PARSE_ERR_DB_PAIR.format(db_pair=db,
+                                              db1_label='orig_db',
+                                              db2_label='new_db'))
     db_entry = grp.groups()
+    orig_db, new_db = db_entry
+
+    # Verify if the size of the databases matched by the REGEX is equal to the
+    # initial specified string. In general, this identifies the missing use
+    # of backticks.
+    matched_size = len(orig_db)
+    if new_db:
+        # add 1 for the separator ':'
+        matched_size = matched_size + 1
+        matched_size = matched_size + len(new_db)
+    if matched_size != len(db):
+        parser.error(PARSE_ERR_DB_PAIR_EXT.format(db_pair=db,
+                                                  db1_label='orig_db',
+                                                  db2_label='new_db',
+                                                  db1_value=orig_db,
+                                                  db2_value=new_db))
+
+    # Remove backtick quotes (handled later)
+    orig_db = remove_backtick_quoting(orig_db) \
+                if is_quoted_with_backticks(orig_db) else orig_db
+    new_db = remove_backtick_quoting(new_db) \
+                if new_db and is_quoted_with_backticks(new_db) else new_db
+    db_entry = (orig_db, new_db)
     db_list.append(db_entry)
 
 try:
@@ -203,8 +261,9 @@ try:
     dbcopy.copy_db(source_values, dest_values, db_list, options)
     if opt.verbosity >= 3:
         print_elapsed_time(start_test)
-except UtilError, e:
-    print "ERROR:", e.errmsg
-    exit(1)
+except UtilError:
+    _, e, _ = sys.exc_info()
+    print("ERROR: %s" % e.errmsg)
+    sys.exit(1)
 
-exit()
+sys.exit()
