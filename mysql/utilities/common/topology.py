@@ -770,24 +770,27 @@ class Topology(Replication):
         slave_retrieved_gtids = slave.get_retrieved_gtid_set()
         cand_slave = self._change_role(candidate)
         candidate_exec_gtids = cand_slave.get_executed_gtid_set()
-        slave_gtids = ",".join([slave_exec_gtids.strip(","),
-                                slave_retrieved_gtids.strip(",")])
-        res = slave.exec_query("SELECT gtid_subset('%s', '%s')" %
-                               (slave_gtids, candidate_exec_gtids.strip(",")))
-        if res and res[0][0].isdigit():
-            result_code = int(res[0][0])
-        else:
-            result_code = -1
-
-        if self.verbose and not self.quiet:
-            if result_code != 1:
-                self._report("# Missing transactions found on %s:%s. "
-                             "SELECT gtid_subset() = %s" %
-                             (slave.host, slave.port, result_code))
-            else:
-                self._report("# No missing transactions found on %s:%s. "
-                             "Skipping connection of candidate as slave." %
-                             (slave.host, slave.port))
+        
+        proceed = slave_exec_gtids is not None and len(slave_exec_gtids) >=1
+        result_code = -1
+        
+        if proceed:
+            slave_gtids = ",".join([slave_exec_gtids.strip(","),
+                                    slave_retrieved_gtids.strip(",")])
+            res = slave.exec_query("SELECT gtid_subset('%s', '%s')" %
+                                   (slave_gtids, candidate_exec_gtids.strip(",")))
+            if res and res[0][0].isdigit():
+                result_code = int(res[0][0])
+    
+            if self.verbose and not self.quiet:
+                if result_code != 1:
+                    self._report("# Missing transactions found on %s:%s. "
+                                 "SELECT gtid_subset() = %s" %
+                                 (slave.host, slave.port, result_code))
+                else:
+                    self._report("# No missing transactions found on %s:%s. "
+                                 "Skipping connection of candidate as slave." %
+                                 (slave.host, slave.port))
 
         return result_code != 1
 
@@ -968,7 +971,8 @@ class Topology(Replication):
             if slave_dict['host'] == slave['host'] and \
                int(slave_dict['port']) == int(slave['port']):
                 # Disconnect to satisfy new server restrictions on termination
-                self.slaves[i]['instance'].disconnect()
+                if self.slaves[i] is not None and self.slaves[i]['instance'] is not None:
+                    self.slaves[i]['instance'].disconnect()
                 self.slaves.pop(i)
                 break
             i += 1
@@ -1214,10 +1218,11 @@ class Topology(Replication):
             self._report("# Checking privileges on candidates.")
             for candidate in candidates:
                 slave_dict = self.connect_candidate(candidate, False)
-                slave = slave_dict['instance']
-                if slave is not None:
-                    servers.append(slave)
-                    candidate_slaves.append(slave)
+                if slave_dict is not None:
+                    slave = slave_dict['instance']
+                    if slave is not None:
+                        servers.append(slave)
+                        candidate_slaves.append(slave)
 
         for server in servers:
             user_inst = User(server, "%s@%s" % (server.user, server.host))
@@ -1264,7 +1269,7 @@ class Topology(Replication):
             # skip dead or zombie slaves
             if slave is None or not slave.is_alive():
                 message = "{0}WARN - cannot connect to slave".format(msg)
-                self.report(message, logging.WARN)
+                self._report(message, logging.WARN)
             elif command == 'reset':
                 if not slave.is_configured_for_master(self.master) and \
                    not quiet:
@@ -1328,16 +1333,22 @@ class Topology(Replication):
             m_candidate = Master(conn_dict)
             m_candidate.connect()
             return m_candidate
+        
         else:
-            s_candidate = Slave(conn_dict)
-            s_candidate.connect()
-            slave_dict = {
-                'host'     : s_candidate.host,
-                'port'     : s_candidate.port,
-                'instance' : s_candidate,
-            }
+            # Do not allow connection error to block
+            # candidate selection
+            slave_dict = None
+            try:
+                s_candidate = Slave(conn_dict)
+                s_candidate.connect()
+                slave_dict = {
+                    'host'     : s_candidate.host,
+                    'port'     : s_candidate.port,
+                    'instance' : s_candidate,
+                }
+            except UtilError as e:
+                self._report("ERROR: %s" % e.errmsg, logging.ERROR)
             return slave_dict
-
 
     def switchover(self, candidate):
         """Perform switchover from master to candidate slave.
@@ -1576,17 +1587,18 @@ class Topology(Replication):
         msg = "None of the candidates was the best slave."
         for candidate in candidates:
             slave_dict = self.connect_candidate(candidate, False)
-            slave = slave_dict['instance']
-            # Ignore dead or offline slaves
-            if slave is None or not slave.is_alive():
-                continue
-            slave_ok = self._check_candidate_eligibility(slave.host, slave.port,
-                                                         slave, check_master)
-            if slave_ok is not None and slave_ok[0]:
-                return slave_dict
-            else:
-                self._report("# Candidate %s:%s does not meet the requirements." %
-                             (slave.host, slave.port), logging.WARN)
+            if slave_dict is not None:
+                slave = slave_dict['instance']
+                # Ignore dead or offline slaves
+                if slave is None or not slave.is_alive():
+                    continue
+                slave_ok = self._check_candidate_eligibility(slave.host, slave.port,
+                                                             slave, check_master)
+                if slave_ok is not None and slave_ok[0]:
+                    return slave_dict
+                else:
+                    self._report("# Candidate %s:%s does not meet the requirements." %
+                                 (slave.host, slave.port), logging.WARN)
 
         # If strict is on and we have found no viable candidates, return None
         if strict:

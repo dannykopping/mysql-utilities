@@ -1479,6 +1479,13 @@ class Slave(Server):
         """
         return self.exec_query("START SLAVE", options)
 
+    def start_io_thread(self, options={}):
+        """Start the slave I/O thread
+
+        options[in]    query options
+        """
+        return self.exec_query("START SLAVE IO_THREAD", options)
+
     def start_sql_thread(self, options={}):
         """Start the slave SQL thread
 
